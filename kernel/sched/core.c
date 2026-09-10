@@ -6120,6 +6120,10 @@ void __init sched_init(void)
 	unsigned long alloc_size = 0, ptr;
 
 	sched_clock_init();
+	#ifdef CONFIG_SCHED_BORE
+	sched_init_bore();
+	printk(KERN_INFO "BORE (Burst-Oriented Response Enhancer) CPU Scheduler modification 5.1.0 by Masahito Suzuki");
+	#endif // CONFIG_SCHED_BORE
 	wait_bit_init();
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
