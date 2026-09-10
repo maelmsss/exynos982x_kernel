@@ -520,8 +520,6 @@ static inline struct rq *rq_of(struct cfs_rq *cfs_rq)
 	return container_of(cfs_rq, struct rq, cfs);
 }
 
-#define entity_is_task(se)	1
-
 #define for_each_sched_entity(se) \
 		for (; se; se = NULL)
 
@@ -734,7 +732,6 @@ static inline u64 calc_delta_fair(u64 delta, struct sched_entity *se)
 {
 	if (unlikely(se->load.weight != NICE_0_LOAD))
 		delta = __calc_delta(delta, NICE_0_LOAD, &se->load);
-
 	return delta;
 }
 
@@ -945,8 +942,14 @@ static void update_curr(struct cfs_rq *cfs_rq)
 
 	curr->sum_exec_runtime += delta_exec;
 	schedstat_add(cfs_rq->exec_clock, delta_exec);
-
+	
+#ifdef CONFIG_SCHED_BORE
+	curr->burst_time += delta_exec;
+	update_burst_penalty(curr);
+	curr->vruntime += max(1ULL, calc_delta_fair(delta_exec, curr));
+#else // !CONFIG_SCHED_BORE
 	curr->vruntime += calc_delta_fair(delta_exec, curr);
+#endif // CONFIG_SCHED_BORE
 	update_min_vruntime(cfs_rq);
 
 	if (entity_is_task(curr)) {
@@ -5440,6 +5443,17 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 	 */
 	if (p->in_iowait)
 		cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
+
+#ifdef CONFIG_SCHED_BORE
+	int task_sleep = flags & DEQUEUE_SLEEP;
+	
+	if (task_sleep) {
+		cfs_rq = cfs_rq_of(se);
+		if (cfs_rq->curr == se)
+			update_curr(cfs_rq);
+		restart_burst(se);
+	}
+#endif // CONFIG_SCHED_BORE
 
 	for_each_sched_entity(se) {
 		if (se->on_rq)
