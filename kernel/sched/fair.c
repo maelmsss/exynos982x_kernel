@@ -8582,6 +8582,27 @@ static void yield_task_fair(struct rq *rq)
 	clear_buddies(cfs_rq, se);
 	#endif // CONFIG_SCHED_BORE
 
+	update_rq_clock(rq);
+	/*
+	* Update run-time statistics of the 'current'.
+	*/
+	update_curr(cfs_rq);
+
+	#ifdef CONFIG_SCHED_BORE
+		restart_burst(se);
+		if (unlikely(rq->nr_running == 1))
+			return;
+
+		clear_buddies(cfs_rq, se);
+	#endif // CONFIG_SCHED_BORE
+
+	/*
+	 * Tell update_rq_clock() that we've just updated,
+	 * so we don't do microscopic update in schedule()
+	 * and double the fastpath cost.
+	 */
+	rq_clock_skip_update(rq, true);
+
 	set_skip_buddy(se);
 }
 
@@ -11738,6 +11759,9 @@ static void task_fork_fair(struct task_struct *p)
 		update_curr(cfs_rq);
 		se->vruntime = curr->vruntime;
 	}
+#ifdef CONFIG_SCHED_BORE
+	update_burst_score(se);
+#endif // CONFIG_SCHED_BORE
 	place_entity(cfs_rq, se, 1);
 
 	if (sysctl_sched_child_runs_first && curr && entity_before(curr, se)) {
