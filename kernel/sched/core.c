@@ -2383,6 +2383,10 @@ static void __sched_fork(unsigned long clone_flags, struct task_struct *p)
 	p->last_sleep_ts		= 0;
 #endif
 
+#ifdef CONFIG_SCHED_BORE
+	sched_fork_bore(p);
+#endif // CONFIG_SCHED_BORE
+
 	INIT_LIST_HEAD(&p->se.group_node);
 #ifdef CONFIG_SCHED_EMS
 	rcu_assign_pointer(p->band, NULL);
@@ -2635,6 +2639,13 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
 
 	put_cpu();
 	return 0;
+}
+
+void sched_post_fork(struct task_struct *p)
+{
+#ifdef CONFIG_SCHED_BORE
+	sched_post_fork_bore(p);
+#endif // CONFIG_SCHED_BORE
 }
 
 unsigned long to_ratio(u64 period, u64 runtime)
