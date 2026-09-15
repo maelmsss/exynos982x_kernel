@@ -1997,8 +1997,6 @@ static int dmac_alloc_resources(struct pl330_dmac *pl330)
 	if (pl330->inst_wrapper)
 		__raw_writel((pl330->mcode_bus >> 32) & 0xf, pl330->inst_wrapper);
 
-	if (IS_ENABLED(CONFIG_IRQ_SBALANCE))
-		return 0;
 
 	if (!pl330->mcode_cpu) {
 		dev_err(pl330->ddma.dev, "%s:%d Can't allocate memory!\n",
