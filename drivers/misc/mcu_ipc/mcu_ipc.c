@@ -325,11 +325,6 @@ static int set_irq_affinity(struct device *dev)
 
 	if (argos_info != NULL) {
 		dev_dbg(dev, "set default irq affinity (0x%x)\n", argos_info->affinity);
-		
-		/* SBalance devredeyse kernelin orjinal atamasini atla */
-		if (IS_ENABLED(CONFIG_IRQ_SBALANCE))
-			return 0;
-
 		return irq_set_affinity(argos_info->irq, cpumask_of(argos_info->affinity));
 	} else {
 		/* skip other mcu_ipc device that has no irq affinity : gnss, ... */
@@ -356,10 +351,6 @@ static int set_fixed_affinity(struct device *dev, int irq, u32 mask)
 #else
 static int set_runtime_affinity(enum mcu_ipc_region id, int irq, u32 mask)
 {
-	/* SBalance devredeyse runtime atamalarini tamamen atla */
-	if (IS_ENABLED(CONFIG_IRQ_SBALANCE))
-		return 0;
-
 	if (!zalloc_cpumask_var(&mcu_dat[id].dmask, GFP_KERNEL))
 		return -ENOMEM;
 	if (!zalloc_cpumask_var(&mcu_dat[id].imask, GFP_KERNEL))
