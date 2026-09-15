@@ -20,7 +20,6 @@
 #include <linux/soc/samsung/exynos-soc.h>
 #include <linux/interrupt.h>
 #include <linux/debug-snapshot-helper.h>
-#include <linux/cpumask.h>
 
 extern struct dbg_snapshot_helper_ops *dss_soc_ops;
 
@@ -47,7 +46,6 @@ static int __init exynos_handler_setup(struct device_node *np)
 {
 	int err = 0, i;
 	int nr_irq;
-	unsigned long irq_flags;
 
 	if (of_property_read_u32(np, "handler_nr_irq", &nr_irq)) {
 		nr_irq = MAX_ERRIRQ;
@@ -62,15 +60,9 @@ static int __init exynos_handler_setup(struct device_node *np)
 				"ecc_handler%d", i);
 		ecc_handler[i].handle_irq = exynos_ecc_handler;
 
-		irq_flags = IRQF_TRIGGER_HIGH | IRQF_GIC_MULTI_TARGET;
-		
-		/* Eger SBalance kapaliysa, Kernel'in orjinal dengeleme yasagini (NOBALANCING) uygula */
-		if (!IS_ENABLED(CONFIG_IRQ_SBALANCE))
-			irq_flags |= IRQF_NOBALANCING;
-
 		err = request_irq(ecc_handler[i].irq,
 				ecc_handler[i].handle_irq,
-				irq_flags,
+				IRQF_TRIGGER_HIGH | IRQF_NOBALANCING | IRQF_GIC_MULTI_TARGET,
 				ecc_handler[i].name, &ecc_handler[i]);
 		if (err) {
 			pr_err("unable to request irq%d for %s ecc handler\n",
@@ -79,10 +71,7 @@ static int __init exynos_handler_setup(struct device_node *np)
 		} else {
 			pr_info("Success to request irq%d for %s ecc handler\n",
 					ecc_handler[i].irq, ecc_handler[i].name);
-			
-			/* Eger SBalance kapaliysa, donanim kesmesini aktif CPU'lara manuel sabitle (Hint) */
-			if (!IS_ENABLED(CONFIG_IRQ_SBALANCE))
-				irq_set_affinity_hint(ecc_handler[i].irq, cpu_online_mask);
+					
 		}
 	}
 
