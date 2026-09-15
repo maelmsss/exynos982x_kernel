@@ -2921,6 +2921,8 @@ int usb_add_hcd(struct usb_hcd *hcd,
 		retval = usb_hcd_request_irqs(hcd, irqnum, irqflags);
 		if (retval)
 			goto err_request_irq;
+		if (!IS_ENABLED(CONFIG_IRQ_SBALANCE))
+			irq_set_affinity_hint(hcd->irq, cpumask_of(0x1));
 	}
 
 	hcd->state = HC_STATE_RUNNING;
@@ -2970,6 +2972,8 @@ err_register_root_hub:
 	del_timer_sync(&hcd->rh_timer);
 err_hcd_driver_start:
 	if (usb_hcd_is_primary_hcd(hcd) && hcd->irq > 0)
+		if (!IS_ENABLED(CONFIG_IRQ_SBALANCE))
+			irq_set_affinity_hint(hcd->irq, NULL);
 		free_irq(irqnum, hcd);
 err_request_irq:
 err_hcd_driver_setup:
