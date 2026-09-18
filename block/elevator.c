@@ -239,7 +239,7 @@ int elevator_init(struct request_queue *q, char *name)
 				return 0;
 
 			if (q->nr_hw_queues == 1)
-				e = elevator_get(q, "mq-deadline", false);
+				e = elevator_get(q, CONFIG_DEFAULT_IOSCHED, false);
 			if (!e)
 				return 0;
 		} else

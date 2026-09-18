@@ -13,11 +13,11 @@ config IOSCHED_NOOP
 	  that do their own scheduling and require only minimal assistance from
 	  the kernel.
 
-config IOSCHED_DEADLINE
-	tristate "Deadline I/O scheduler"
+config CONFIG_MQ_IOSCHED_DEADLINE
+	tristate "Mq-deadline I/O scheduler"
 	default y
 	---help---
-	  The deadline I/O scheduler is simple and compact. It will provide
+	  The mq-deadline I/O scheduler is simple and compact. It will provide
 	  CSCAN service with FIFO expiration of requests, switching to
 	  a new point in the service tree and doing a batch of IO from there
 	  in case of expiry.
@@ -43,10 +43,14 @@ config CFQ_GROUP_IOSCHED
 choice
 
 	prompt "Default I/O scheduler"
-	default DEFAULT_CFQ
+	default DEFAULT_MQ_IOSCHED_DEADLINE
 	help
 	  Select the I/O scheduler which will be used by default for all
 	  block devices.
+
+	config DEFAULT_MQ_IOSCHED_DEADLINE
+		bool "MQ_IOSCHED_DEADLINE" if MQ_IOSCHED_DEADLINE=y
+
 
 	config DEFAULT_DEADLINE
 		bool "Deadline" if IOSCHED_DEADLINE=y
@@ -61,7 +65,8 @@ endchoice
 
 config DEFAULT_IOSCHED
 	string
-	default "deadline" if DEFAULT_DEADLINE
+	default "kyber" if DEFAULT_MQ_IOSCHED_KYBER
+	default "mq-deadline" if DEFAULT_MQ_IOSCHED_DEADLINE
 	default "cfq" if DEFAULT_CFQ
 	default "noop" if DEFAULT_NOOP
 
@@ -79,6 +84,7 @@ config MQ_IOSCHED_KYBER
 	  multiqueue and other fast devices. Given target latencies for reads and
 	  synchronous writes, it will self-tune queue depths to achieve that
 	  goal.
+
 
 config IOSCHED_BFQ
 	tristate "BFQ I/O scheduler"
