@@ -228,27 +228,23 @@ int elevator_init(struct request_queue *q, char *name)
 	}
 
 	if (!e) {
-		/*
-		 * For blk-mq devices, we default to using mq-deadline,
-		 * if available, for single queue devices. If deadline
-		 * isn't available OR we have multiple queues, default
-		 * to "none".
-		 */
 		if (q->mq_ops) {
-			if (q->tag_set && q->tag_set->flags & BLK_MQ_F_NO_SCHED_BY_DEFAULT)
+			if (q->tag_set &&
+			    q->tag_set->flags & BLK_MQ_F_NO_SCHED_BY_DEFAULT)
 				return 0;
 
-			if (q->nr_hw_queues == 1)
-				e = elevator_get(q, CONFIG_DEFAULT_IOSCHED, false);
+			e = elevator_get(q, "mq-deadline", false);
+			if (!e)
+				e = elevator_get(q, "kyber", false);
 			if (!e)
 				return 0;
-		} else
+		} else {
 			e = elevator_get(q, CONFIG_DEFAULT_IOSCHED, false);
+		}
 
 		if (!e) {
 			printk(KERN_ERR
-				"Default I/O scheduler not found. " \
-				"Using noop.\n");
+				"Default I/O scheduler not found. Using noop.\n");
 			e = elevator_get(q, "noop", false);
 		}
 	}
