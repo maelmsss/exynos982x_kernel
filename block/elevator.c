@@ -624,20 +624,23 @@ void elv_requeue_request(struct request_queue *q, struct request *rq)
 void elv_drain_elevator(struct request_queue *q)
 {
 	struct elevator_queue *e = q->elevator;
-	static int printed;
-
-	if (WARN_ON_ONCE(e->uses_mq))
-		return;
+	int max = 10000;
 
 	lockdep_assert_held(q->queue_lock);
 
-	while (e->type->ops.sq.elevator_dispatch_fn(q, 1))
+	if (!e || q->mq_ops)
+		return;
+	if (WARN_ON_ONCE(e->uses_mq))
+		return;
+	if (!e->type || !e->type->ops.sq.elevator_dispatch_fn)
+		return;
+
+	while (e->type->ops.sq.elevator_dispatch_fn(q, 1) && --max)
 		;
-	if (q->nr_sorted && printed++ < 10) {
-		printk(KERN_ERR "%s: forced dispatching is broken "
-		       "(nr_sorted=%u), please report this\n",
-		       q->elevator->type->elevator_name, q->nr_sorted);
-	}
+
+	if (q->nr_sorted && !max)
+		pr_err("%s: forced dispatching is broken (nr_sorted=%u)\n",
+		       e->type->elevator_name, q->nr_sorted);
 }
 
 void __elv_add_request(struct request_queue *q, struct request *rq, int where)
