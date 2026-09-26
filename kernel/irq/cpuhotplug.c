@@ -165,8 +165,28 @@ void irq_migrate_all_off_this_cpu(void)
 		affinity_broken = migrate_one_irq(desc);
 		raw_spin_unlock(&desc->lock);
 
-		if (affinity_broken) {
-			pr_warn_ratelimited("IRQ %u: no longer affine to CPU%u\n",
+		diff --git a/kernel/irq/cpuhotplug.c b/kernel/irq/cpuhotplug.c
+index 0000000..0000000 100644
+--- a/kernel/irq/cpuhotplug.c
++++ b/kernel/irq/cpuhotplug.c
+@@ -131,7 +131,7 @@ static bool migrate_one_irq(struct irq_desc *desc)
+ 	 */
+ 	err = irq_do_set_affinity(d, affinity, false);
+ 	if (err) {
+-		pr_warn_ratelimited("IRQ%u: set affinity failed(%d).\n",
++		pr_debug_ratelimited("IRQ%u: set affinity failed(%d).\n",
+ 				    d->irq, err);
+ 		brokeaff = false;
+ 	}
+@@ -166,7 +166,7 @@ void irq_migrate_all_off_this_cpu(void)
+ 		raw_spin_unlock(&desc->lock);
+ 
+ 		if (affinity_broken) {
+-			pr_warn_ratelimited("IRQ %u: no longer affine to CPU%u\n",
++			pr_debug_ratelimited("IRQ %u: no longer affine to CPU%u\n",
+ 					    irq, smp_processor_id());
+ 		}
+ 	}
 					    irq, smp_processor_id());
 		}
 	}
