@@ -181,7 +181,7 @@ static void update_burst_score(struct sched_entity *se)
 
     p = task_of(se);
     prio = p->static_prio - MAX_RT_PRIO;
-    prev_prio = min(39, prio + se->burst_score);
+    prev_prio = min(39, prio + (sched_bore ? se->burst_score : 0));
 
     se->burst_score = se->burst_penalty >> 2;
     score = sched_bore ? se->burst_score : 0;
