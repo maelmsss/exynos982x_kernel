@@ -168,7 +168,26 @@ static inline u64 scale_slice(u64 delta, struct sched_entity *se) {
 
 /* Defined further down (after account_entity_{enqueue,dequeue}()), which it
  * depends on. Forward-declared here so update_burst_score() can call it. */
-static void reweight_task_bore(struct task_struct *p, u8 prio);
+static void reweight_task_bore(struct task_struct *p, u8 prio)
+{
+    struct sched_entity *se = &p->se;
+    struct cfs_rq *cfs_rq = cfs_rq_of(se);
+    unsigned long weight;
+
+    if (idle_policy(p->policy))
+        return;
+
+    weight = scale_load(sched_prio_to_weight[prio]);
+
+    if (se->on_rq)
+        account_entity_dequeue(cfs_rq, se);
+
+    update_load_set(&se->load, weight);
+    se->load.inv_weight = sched_prio_to_wmult[prio];
+
+    if (se->on_rq)
+        account_entity_enqueue(cfs_rq, se);
+}
 
 static void update_burst_score(struct sched_entity *se)
 {
