@@ -166,6 +166,10 @@ static inline u64 scale_slice(u64 delta, struct sched_entity *se) {
 	return mul_u64_u32_shr(delta, sched_prio_to_wmult[se->burst_score], 22);
 }
 
+/* Defined further down (after account_entity_{enqueue,dequeue}()), which it
+ * depends on. Forward-declared here so update_burst_score() can call it. */
+static void reweight_task_bore(struct task_struct *p, u8 prio);
+
 static void update_burst_score(struct sched_entity *se) {
 	if (!entity_is_task(se)) return;
 	struct task_struct *p = task_of(se);
@@ -175,8 +179,8 @@ static void update_burst_score(struct sched_entity *se) {
 	se->burst_score = se->burst_penalty >> 2;
 
 	u8 new_prio = min(39, prio + se->burst_score);
-	// if (new_prio != prev_prio)
-	// 	reweight_task(p, new_prio);
+	if (new_prio != prev_prio)
+		reweight_task_bore(p, new_prio);
 }
 
 static void update_burst_penalty(struct sched_entity *se) {
@@ -2820,6 +2824,35 @@ account_entity_dequeue(struct cfs_rq *cfs_rq, struct sched_entity *se)
 #endif
 	cfs_rq->nr_running--;
 }
+
+#ifdef CONFIG_SCHED_BORE
+/*
+ * Apply a BORE-computed effective priority (0-39, niceness-like) to a task's
+ * CFS weight. This mirrors what reweight_entity() below does, but is kept
+ * self-contained and unconditional (not gated behind CONFIG_FAIR_GROUP_SCHED)
+ * since account_entity_enqueue()/account_entity_dequeue()/update_load_set()
+ * are always available. Called from update_curr() context, so the rq lock is
+ * already held by the caller.
+ */
+static void reweight_task_bore(struct task_struct *p, u8 prio)
+{
+	struct sched_entity *se = &p->se;
+	struct cfs_rq *cfs_rq = cfs_rq_of(se);
+	unsigned long weight = scale_load(sched_prio_to_weight[prio]);
+
+	if (se->on_rq) {
+		if (cfs_rq->curr == se)
+			update_curr(cfs_rq);
+		account_entity_dequeue(cfs_rq, se);
+	}
+
+	update_load_set(&se->load, weight);
+	se->load.inv_weight = sched_prio_to_wmult[prio];
+
+	if (se->on_rq)
+		account_entity_enqueue(cfs_rq, se);
+}
+#endif // CONFIG_SCHED_BORE
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
 # ifdef CONFIG_SMP
