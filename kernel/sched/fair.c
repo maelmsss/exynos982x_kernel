@@ -2833,7 +2833,6 @@ account_entity_dequeue(struct cfs_rq *cfs_rq, struct sched_entity *se)
 	cfs_rq->nr_running--;
 }
 
-#ifdef CONFIG_SCHED_BORE
 /*
  * Apply a BORE-computed effective priority (0-39, niceness-like) to a task's
  * CFS weight. This mirrors what reweight_entity() below does, but is kept
@@ -2863,7 +2862,7 @@ static void reweight_task_bore(struct task_struct *p, u8 prio)
 	if (se->on_rq)
 		account_entity_enqueue(cfs_rq, se);
 }
-#endif
+#endif /* CONFIG_SCHED_BORE */
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
 # ifdef CONFIG_SMP
