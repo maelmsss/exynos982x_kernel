@@ -62,6 +62,10 @@ const_debug unsigned int sysctl_sched_features =
 
 #undef SCHED_FEAT
 
+#ifdef CONFIG_SCHED_BORE
+extern uint sched_bore;
+#endif
+
 /*
  * Number of tasks to iterate in a single balance run.
  * Limited because this is done with IRQs disabled.
@@ -760,6 +764,11 @@ static void set_load_weight(struct task_struct *p)
 		load->inv_weight = WMULT_IDLEPRIO;
 		return;
 	}
+
+#ifdef CONFIG_SCHED_BORE
+	if (sched_bore)
+		prio = min(39, prio + p->se.burst_score);
+#endif
 
 	load->weight = scale_load(sched_prio_to_weight[prio]);
 	load->inv_weight = sched_prio_to_wmult[prio];
@@ -2232,7 +2241,7 @@ int wake_up_state(struct task_struct *p, unsigned int state)
 }
 
 #ifdef CONFIG_SCHED_BORE
-extern u8   sched_burst_fork_atavistic;
+extern uint sched_burst_fork_atavistic;
 extern uint sched_burst_cache_lifetime;
 
 static void __init sched_init_bore(void) {
