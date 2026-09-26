@@ -711,6 +711,28 @@ schedtune_css_free(struct cgroup_subsys_state *css)
 	kfree(st);
 }
 
+static int schedtune_css_online(struct cgroup_subsys_state *css)
+{
+	struct schedtune *st = css_st(css);
+	const char *name;
+
+	if (!css->cgroup || !css->cgroup->kn)
+		return 0;
+	name = css->cgroup->kn->name;
+
+	if (!strcmp(name, "top-app")) {
+		st->prefer_idle = 1;
+		st->prefer_perf = 1;	/* EMS: A75/M4'e al, senin echo'dan daha etkili */
+		st->ontime_en = 1;
+		st->boost = 10;
+		schedtune_boostgroup_update(st->idx, st->boost);
+	} else if (!strcmp(name, "foreground")) {
+		st->prefer_idle = 1;
+		st->boost = 0;
+	}
+	return 0;
+}
+
 struct cgroup_subsys schedtune_cgrp_subsys = {
 	.css_alloc	= schedtune_css_alloc,
 	.css_free	= schedtune_css_free,
