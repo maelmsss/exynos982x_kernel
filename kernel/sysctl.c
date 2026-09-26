@@ -1276,7 +1276,7 @@ static struct ctl_table kern_table[] = {
 	{
 		.procname	= "sched_bore",
 		.data		= &sched_bore,
-		.maxlen		= sizeof(int),
+		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
 		.proc_handler = proc_douintvec_minmax,
 		.extra1		= &one,
@@ -1285,7 +1285,7 @@ static struct ctl_table kern_table[] = {
 	{
 		.procname	= "sched_burst_smoothness_long",
 		.data		= &sched_burst_smoothness_long,
-		.maxlen		= sizeof(int),
+		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
 		.proc_handler = proc_douintvec_minmax,
 		.extra1		= &zero,
@@ -1294,7 +1294,7 @@ static struct ctl_table kern_table[] = {
 	{
 		.procname	= "sched_burst_smoothness_short",
 		.data		= &sched_burst_smoothness_short,
-		.maxlen		= sizeof(int),
+		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
 		.proc_handler = proc_douintvec_minmax,
 		.extra1		= &zero,
@@ -1303,7 +1303,7 @@ static struct ctl_table kern_table[] = {
 	{
 		.procname	= "sched_burst_fork_atavistic",
 		.data		= &sched_burst_fork_atavistic,
-		.maxlen		= sizeof(int),
+		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
 		.proc_handler = proc_douintvec_minmax,
 		.extra1		= &zero,
@@ -1312,7 +1312,7 @@ static struct ctl_table kern_table[] = {
 	{
 		.procname	= "sched_burst_penalty_offset",
 		.data		= &sched_burst_penalty_offset,
-		.maxlen		= sizeof(int),
+		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
 		.proc_handler = proc_douintvec_minmax,
 		.extra1		= &zero,
@@ -1321,7 +1321,7 @@ static struct ctl_table kern_table[] = {
 	{
 		.procname	= "sched_burst_penalty_scale",
 		.data		= &sched_burst_penalty_scale,
-		.maxlen		= sizeof(int),
+		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
 		.proc_handler = proc_douintvec_minmax,
 		.extra1		= &zero,
@@ -1330,7 +1330,7 @@ static struct ctl_table kern_table[] = {
 	{
 		.procname	= "sched_burst_cache_lifetime",
 		.data		= &sched_burst_cache_lifetime,
-		.maxlen		= sizeof(int),
+		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
 		.proc_handler = proc_douintvec,
 	},
