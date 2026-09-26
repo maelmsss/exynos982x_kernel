@@ -168,26 +168,8 @@ static inline u64 scale_slice(u64 delta, struct sched_entity *se) {
 
 /* Defined further down (after account_entity_{enqueue,dequeue}()), which it
  * depends on. Forward-declared here so update_burst_score() can call it. */
-static void reweight_task_bore(struct task_struct *p, u8 prio)
-{
-    struct sched_entity *se = &p->se;
-    struct cfs_rq *cfs_rq = cfs_rq_of(se);
-    unsigned long weight;
-
-    if (idle_policy(p->policy))
-        return;
-
-    weight = scale_load(sched_prio_to_weight[prio]);
-
-    if (se->on_rq)
-        account_entity_dequeue(cfs_rq, se);
-
-    update_load_set(&se->load, weight);
-    se->load.inv_weight = sched_prio_to_wmult[prio];
-
-    if (se->on_rq)
-        account_entity_enqueue(cfs_rq, se);
-}
+/* Defined further down (after account_entity_{enqueue,dequeue}()). */
+static void reweight_task_bore(struct task_struct *p, u8 prio);
 
 static void update_burst_score(struct sched_entity *se)
 {
@@ -2860,17 +2842,20 @@ account_entity_dequeue(struct cfs_rq *cfs_rq, struct sched_entity *se)
  * are always available. Called from update_curr() context, so the rq lock is
  * already held by the caller.
  */
+#ifdef CONFIG_SCHED_BORE
 static void reweight_task_bore(struct task_struct *p, u8 prio)
 {
 	struct sched_entity *se = &p->se;
 	struct cfs_rq *cfs_rq = cfs_rq_of(se);
-	unsigned long weight = scale_load(sched_prio_to_weight[prio]);
+	unsigned long weight;
 
-	if (se->on_rq) {
-		if (cfs_rq->curr == se)
-			update_curr(cfs_rq);
+	if (idle_policy(p->policy))
+		return;
+
+	weight = scale_load(sched_prio_to_weight[prio]);
+
+	if (se->on_rq)
 		account_entity_dequeue(cfs_rq, se);
-	}
 
 	update_load_set(&se->load, weight);
 	se->load.inv_weight = sched_prio_to_wmult[prio];
@@ -2878,7 +2863,7 @@ static void reweight_task_bore(struct task_struct *p, u8 prio)
 	if (se->on_rq)
 		account_entity_enqueue(cfs_rq, se);
 }
-#endif // CONFIG_SCHED_BORE
+#endif
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
 # ifdef CONFIG_SMP
@@ -5466,13 +5451,24 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 {
 	struct cfs_rq *cfs_rq;
 	struct sched_entity *se = &p->se;
+	int task_new = !(flags & ENQUEUE_WAKEUP);
+
+	util_est_enqueue(&rq->cfs, p);
+	enqueue_multi_load(&rq->cfs, p);
+	schedtune_enqueue_task(p, cpu_of(rq));
+
+	if (p->in_iowait)
+		cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
+
 #ifdef CONFIG_SCHED_BORE
-    if (flags & ENQUEUE_WAKEUP) {
-        if (cfs_rq_of(se)->curr == se)
-            update_curr(cfs_rq_of(se));
-        restart_burst(se);
-    }
+	if (flags & ENQUEUE_WAKEUP) {
+		if (cfs_rq_of(se)->curr == se)
+			update_curr(cfs_rq_of(se));
+		restart_burst(se);
+	}
 #endif
+
+	for_each_sched_entity(se) {
 
 	/*
 	 * The code below (indirectly) updates schedutil which looks at
