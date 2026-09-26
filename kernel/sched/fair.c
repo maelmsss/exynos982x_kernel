@@ -170,17 +170,24 @@ static inline u64 scale_slice(u64 delta, struct sched_entity *se) {
  * depends on. Forward-declared here so update_burst_score() can call it. */
 static void reweight_task_bore(struct task_struct *p, u8 prio);
 
-static void update_burst_score(struct sched_entity *se) {
-	if (!entity_is_task(se)) return;
-	struct task_struct *p = task_of(se);
-	u8 prio = p->static_prio - MAX_RT_PRIO;
-	u8 prev_prio = min(39, prio + se->burst_score);
+static void update_burst_score(struct sched_entity *se)
+{
+    struct task_struct *p;
+    u8 prio, prev_prio, new_prio, score;
 
-	se->burst_score = se->burst_penalty >> 2;
+    if (!entity_is_task(se))
+        return;
 
-	u8 new_prio = min(39, prio + se->burst_score);
-	if (new_prio != prev_prio)
-		reweight_task_bore(p, new_prio);
+    p = task_of(se);
+    prio = p->static_prio - MAX_RT_PRIO;
+    prev_prio = min(39, prio + se->burst_score);
+
+    se->burst_score = se->burst_penalty >> 2;
+    score = sched_bore ? se->burst_score : 0;
+    new_prio = min(39, (unsigned int)prio + score);
+
+    if (new_prio != prev_prio)
+        reweight_task_bore(p, new_prio);
 }
 
 static void update_burst_penalty(struct sched_entity *se) {
