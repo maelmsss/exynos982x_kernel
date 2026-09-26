@@ -548,6 +548,11 @@ prefer_idle_write(struct cgroup_subsys_state *css, struct cftype *cft,
 	    u64 prefer_idle)
 {
 	struct schedtune *st = css_st(css);
+
+	if (css->cgroup && css->cgroup->kn && !strcmp(css->cgroup->kn->name, "top-app")) {
+		if (!prefer_idle) prefer_idle = 1;
+	}
+
 	st->prefer_idle = !!prefer_idle;
 
 	return 0;
@@ -566,6 +571,11 @@ prefer_perf_write(struct cgroup_subsys_state *css, struct cftype *cft,
 	    u64 prefer_perf)
 {
 	struct schedtune *st = css_st(css);
+
+	if (css->cgroup && css->cgroup->kn && !strcmp(css->cgroup->kn->name, "top-app")) {
+		if (!prefer_perf) prefer_perf = 1;
+	}
+
 	st->prefer_perf = prefer_perf;
 
 	return 0;
@@ -587,6 +597,10 @@ boost_write(struct cgroup_subsys_state *css, struct cftype *cft,
 
 	if (boost < 0 || boost > 100)
 		return -EINVAL;
+
+	if (css->cgroup && css->cgroup->kn && !strcmp(css->cgroup->kn->name, "top-app")) {
+		if (boost < 10) boost = 10;
+	}
 
 	st->boost = boost;
 
@@ -735,6 +749,7 @@ static int schedtune_css_online(struct cgroup_subsys_state *css)
 
 struct cgroup_subsys schedtune_cgrp_subsys = {
 	.css_alloc	= schedtune_css_alloc,
+	.css_online	= schedtune_css_online,
 	.css_free	= schedtune_css_free,
 	.can_attach     = schedtune_can_attach,
 	.cancel_attach  = schedtune_cancel_attach,
