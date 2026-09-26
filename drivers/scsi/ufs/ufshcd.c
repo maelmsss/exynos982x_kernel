@@ -8086,6 +8086,7 @@ static struct scsi_host_template ufshcd_driver_template = {
 	.max_host_blocked	= 1,
 	.skip_settle_delay	= 1,
 	.track_queue_depth	= 1,
+	.force_blk_mq = 1,
 };
 
 static int ufshcd_config_vreg_load(struct device *dev, struct ufs_vreg *vreg,
@@ -9790,13 +9791,15 @@ int ufshcd_alloc_host(struct device *dev, struct ufs_hba **hba_handle)
 		goto out_error;
 	}
 
-	host = scsi_host_alloc(&ufshcd_driver_template,
-				sizeof(struct ufs_hba));
+		host = scsi_host_alloc(&ufshcd_driver_template, sizeof(struct ufs_hba));
 	if (!host) {
 		dev_err(dev, "scsi_host_alloc failed\n");
 		err = -ENOMEM;
 		goto out_error;
 	}
+
+	host->use_blk_mq = true;
+	
 	hba = shost_priv(host);
 	hba->host = host;
 	hba->dev = dev;

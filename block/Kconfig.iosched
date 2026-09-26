@@ -41,12 +41,11 @@ config CFQ_GROUP_IOSCHED
 	  Enable group IO scheduling in CFQ.
 
 choice
-
 	prompt "Default I/O scheduler"
-	default DEFAULT_CFQ
+	default DEFAULT_NOOP
 	help
 	  Select the I/O scheduler which will be used by default for all
-	  block devices.
+	  block devices. This applies to legacy (non-mq) devices only.
 
 	config DEFAULT_DEADLINE
 		bool "Deadline" if IOSCHED_DEADLINE=y
@@ -76,29 +75,20 @@ config MQ_IOSCHED_KYBER
 	default y
 	---help---
 	  The Kyber I/O scheduler is a low-overhead scheduler suitable for
-	  multiqueue and other fast devices. Given target latencies for reads and
-	  synchronous writes, it will self-tune queue depths to achieve that
-	  goal.
+	  multiqueue and other fast devices.
 
 config IOSCHED_BFQ
 	tristate "BFQ I/O scheduler"
 	default n
 	---help---
-	BFQ I/O scheduler for BLK-MQ. BFQ distributes the bandwidth of
-	of the device among all processes according to their weights,
-	regardless of the device parameters and with any workload. It
-	also guarantees a low latency to interactive and soft
-	real-time applications.  Details in
-	Documentation/block/bfq-iosched.txt
+	  BFQ I/O scheduler for BLK-MQ.
 
 config BFQ_GROUP_IOSCHED
-       bool "BFQ hierarchical scheduling support"
-       depends on IOSCHED_BFQ && BLK_CGROUP
-       default n
-       ---help---
-
-       Enable hierarchical scheduling in BFQ, using the blkio
-       (cgroups-v1) or io (cgroups-v2) controller.
+	bool "BFQ hierarchical scheduling support"
+	depends on IOSCHED_BFQ && BLK_CGROUP
+	default n
+	---help---
+	  Enable hierarchical scheduling in BFQ.
 
 endmenu
 
