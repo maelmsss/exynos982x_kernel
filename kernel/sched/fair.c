@@ -5460,13 +5460,6 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 	if (p->in_iowait)
 		cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
 
-#ifdef CONFIG_SCHED_BORE
-	if (flags & ENQUEUE_WAKEUP) {
-		if (cfs_rq_of(se)->curr == se)
-			update_curr(cfs_rq_of(se));
-		restart_burst(se);
-	}
-#endif
 
 	for_each_sched_entity(se) {
 
