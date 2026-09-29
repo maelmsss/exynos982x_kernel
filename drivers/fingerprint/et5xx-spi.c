@@ -13,6 +13,7 @@
 
 #include "fingerprint.h"
 #include "et5xx.h"
+#include <linux/fp_boost.h>
 
 #include <linux/module.h>
 #include <linux/kernel.h>
