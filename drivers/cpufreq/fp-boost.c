@@ -390,8 +390,9 @@ static int __init cpu_fp_init(void)
 
 	/* Allow global boost config access */
 	boost_policy_g = b;
+		set_boost_bit(b, DRIVER_ENABLED);
 
-	ret = input_register_handler(&cpu_fp_input_handler);
+		ret = input_register_handler(&cpu_fp_input_handler);
 	if (ret) {
 		pr_err("Failed to register input handler, err: %d\n", ret);
 		goto free_mem;
