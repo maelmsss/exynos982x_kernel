@@ -13,11 +13,7 @@
 
 #include "fingerprint.h"
 #include "qbt2000_common.h"
-#ifdef CONFIG_FINGERPRINT_BOOST
-extern void fp_boost_kick(void);
-#else
-static inline void fp_boost_kick(void) { }
-#endif
+#include <linux/fp_boost.h>
 
 static struct qbt2000_drvdata *g_data = NULL;
 
