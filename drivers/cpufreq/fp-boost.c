@@ -139,6 +139,28 @@ static struct notifier_block do_cpu_boost_nb = {
 	.priority = INT_MAX,
 };
 
+void fp_boost_kick(void)
+{
+	struct boost_policy *b = boost_policy_g;
+	struct fp_config *fp;
+	uint32_t state;
+
+	if (!b)
+		return;
+
+	fp = &b->fp;
+	state = get_boost_state(b);
+
+	if (!(state & DRIVER_ENABLED) || touched)
+		return;
+
+	pr_info("Kicked from fingerprint driver\n");
+	touched = true;
+	set_boost_bit(b, FINGERPRINT_BOOST);
+	queue_delayed_work(b->wq, &fp->boost_work, msecs_to_jiffies(20));
+}
+EXPORT_SYMBOL_GPL(fp_boost_kick);
+
 static void cpu_fp_input_event(struct input_handle *handle, unsigned int type,
 		unsigned int code, int value)
 {
