@@ -77,10 +77,7 @@ static irqreturn_t etspi_fingerprint_interrupt(int irq, void *dev_id)
 
 	etspi->int_count++;
 	etspi->finger_on = 1;
-	etspi->int_count++;
-	etspi->finger_on = 1;
 	fp_boost_kick();
-	disable_irq_nosync(gpio_irq);
 	disable_irq_nosync(gpio_irq);
 	wake_up_interruptible(&interrupt_waitq);
 	wake_lock_timeout(&etspi->fp_signal_lock, 1 * HZ);
