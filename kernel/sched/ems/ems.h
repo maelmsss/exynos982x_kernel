@@ -48,6 +48,11 @@ extern void init_part(void);
 #ifdef CONFIG_SCHED_TUNE
 extern int prefer_perf_cpu(struct task_struct *p);
 extern int prefer_idle_cpu(struct task_struct *p);
+#ifdef CONFIG_SCHED_BORE
+extern int bore_wakeup_cpu(struct task_struct *p);
+#else
+static inline int bore_wakeup_cpu(struct task_struct *p) { return -1; }
+#endif
 extern int group_balancing(struct task_struct *p);
 #else
 static inline int prefer_perf_cpu(struct task_struct *p) { return -1; }
