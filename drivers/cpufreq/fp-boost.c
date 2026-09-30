@@ -75,6 +75,7 @@ static void fp_unboost(struct work_struct *work)
 
 	atomic_andnot(FINGERPRINT_BOOST, &b->state);
 	pr_debug("releasing boost\n");
+	wake_unlock(&b->wlock);
 	update_online_cpu_policy();
 }
 
@@ -104,6 +105,15 @@ static struct notifier_block do_cpu_boost_nb = {
 	.notifier_call = do_cpu_boost,
 	.priority = INT_MAX,
 };
+
+static int fp_boost_cpu_online(unsigned int cpu)
+{
+	struct boost_drv *b = READ_ONCE(boost_drv_g);
+
+	if (b && (atomic_read(&b->state) & FINGERPRINT_BOOST))
+		cpufreq_update_policy(cpu);
+	return 0;
+}
 
 void fp_boost_kick(void)
 {
@@ -136,7 +146,10 @@ void fp_boost_relax(void)
 
 	if (!(atomic_read(&b->state) & FINGERPRINT_BOOST))
 		return;
-
+	
+	wake_lock_timeout(&b->wlock,
+			  msecs_to_jiffies(READ_ONCE(b->duration_ms)));
+	
 	mod_delayed_work(b->wq, &b->unboost_work,
 			 msecs_to_jiffies(FP_RELAX_MS));
 }
@@ -306,6 +319,7 @@ static int __init cpu_fp_init(void)
 	INIT_WORK(&b->boost_work, fp_boost_apply);
 	INIT_DELAYED_WORK(&b->unboost_work, fp_unboost);
 	atomic_set(&b->state, DRIVER_ENABLED);
+	wake_lock_init(&b->wlock, WAKE_LOCK_SUSPEND, "fp_boost");
 	b->duration_ms = FP_BOOST_MS_DEFAULT;
 
 	ret = input_register_handler(&cpu_fp_input_handler);
@@ -334,6 +348,8 @@ static int __init cpu_fp_init(void)
 	}
 
 	/* Publish only after everything is ready so IRQ kick is safe. */
+	cpuhp_setup_state_nocalls(CPUHP_AP_ONLINE_DYN, "fp-boost:online",
+				  fp_boost_cpu_online, NULL);
 	WRITE_ONCE(boost_drv_g, b);
 	pr_info("initialized (duration=%u ms)\n", b->duration_ms);
 	return 0;
