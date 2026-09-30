@@ -1054,8 +1054,6 @@ static irqreturn_t qbt2000_wuhb_irq_handler(int irq, void *dev_id)
 			 ^ drvdata->fd_gpio.active_low;
 		if (st == FINGER_DOWN_GPIO_STATE)
 			fp_boost_kick();
-		else
-			fp_boost_relax();
 	}
 	
 	drvdata->wuhb_count++;
