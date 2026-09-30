@@ -130,6 +130,20 @@ int exynos_wakeup_balance(struct task_struct *p, int prev_cpu, int sd_flag, int 
 		goto out;
 	}
 
+	target_cpu = ontime_task_wakeup(p, sync);
+	if (cpu_selected(target_cpu)) {
+		strcpy(state, "ontime migration");
+		goto out;
+	}
+
+	target_cpu = bore_wakeup_cpu(p);
+	if (cpu_selected(target_cpu)) {
+		strcpy(state, "bore-latency");
+		goto out;
+	}
+
+	target_cpu = prefer_perf_cpu(p);
+
 	/*
 	 * Priority 2 : prefer-perf
 	 *
