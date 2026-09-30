@@ -41,6 +41,7 @@ struct boost_drv {
 	struct wake_lock wlock;
 	atomic_t state;
 	unsigned int duration_ms;
+	int cpuhp_state;
 };
 
 static struct boost_drv *boost_drv_g;
@@ -243,6 +244,7 @@ static ssize_t enabled_store(struct kobject *kobj, struct kobj_attribute *attr,
 		cancel_work_sync(&b->boost_work);
 		cancel_delayed_work_sync(&b->unboost_work);
 		atomic_andnot(FINGERPRINT_BOOST, &b->state);
+		wake_unlock(&b->wlock);
 		update_online_cpu_policy();
 	}
 
@@ -324,7 +326,7 @@ static int __init cpu_fp_init(void)
 	ret = input_register_handler(&cpu_fp_input_handler);
 	if (ret) {
 		pr_err("failed to register input handler: %d\n", ret);
-		goto err_wq;
+		goto err_wlock;
 	}
 
 	b->kobj = kobject_create_and_add("fp_boost", kernel_kobj);
@@ -347,8 +349,13 @@ static int __init cpu_fp_init(void)
 	}
 
 	/* Publish only after everything is ready so IRQ kick is safe. */
-	cpuhp_setup_state_nocalls(CPUHP_AP_ONLINE_DYN, "fp-boost:online",
-				  fp_boost_cpu_online, NULL);
+	ret = cpuhp_setup_state_nocalls(CPUHP_AP_ONLINE_DYN, "fp-boost:online",
+					fp_boost_cpu_online, NULL);
+	if (ret < 0) {
+		pr_err("failed to setup cpuhp: %d\n", ret);
+		goto err_notif;
+	}
+	b->cpuhp_state = ret;
 	WRITE_ONCE(boost_drv_g, b);
 	pr_info("initialized (duration=%u ms)\n", b->duration_ms);
 	return 0;
@@ -359,6 +366,8 @@ err_kobj:
 	kobject_put(b->kobj);
 err_input:
 	input_unregister_handler(&cpu_fp_input_handler);
+err_wlock:
+	wake_lock_destroy(&b->wlock);
 err_wq:
 	destroy_workqueue(b->wq);
 err_free:
