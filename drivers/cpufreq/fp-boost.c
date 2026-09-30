@@ -21,6 +21,8 @@
 #include <linux/slab.h>
 #include <linux/sysfs.h>
 #include <linux/workqueue.h>
+#include <linux/cpuhotplug.h>
+#include <linux/wakelock.h>
 
 #define DRIVER_ENABLED		(1 << 0)
 #define FINGERPRINT_BOOST	(1 << 1)
