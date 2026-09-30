@@ -132,6 +132,8 @@ void fp_boost_kick(void)
 		queue_work(b->wq, &b->boost_work);
 	}
 
+	wake_lock_timeout(&b->wlock,
+			  msecs_to_jiffies(READ_ONCE(b->duration_ms)));
 	mod_delayed_work(b->wq, &b->unboost_work,
 			 msecs_to_jiffies(READ_ONCE(b->duration_ms)));
 }
@@ -146,10 +148,7 @@ void fp_boost_relax(void)
 
 	if (!(atomic_read(&b->state) & FINGERPRINT_BOOST))
 		return;
-	
-	wake_lock_timeout(&b->wlock,
-			  msecs_to_jiffies(READ_ONCE(b->duration_ms)));
-	
+
 	mod_delayed_work(b->wq, &b->unboost_work,
 			 msecs_to_jiffies(FP_RELAX_MS));
 }
