@@ -130,3 +130,23 @@ int prefer_idle_cpu(struct task_struct *p)
 
 	return select_idle_cpu(p);
 }
+
+#ifdef CONFIG_SCHED_BORE
+extern uint sched_bore;
+
+#define BORE_LAT_SCORE 4
+
+int bore_wakeup_cpu(struct task_struct *p)
+{
+	if (!sched_bore)
+		return -1;
+	if (p->sched_class != &fair_sched_class)
+		return -1;
+	if (p->se.burst_score > BORE_LAT_SCORE)
+		return -1;
+	if (schedtune_prefer_idle(p) <= 0 &&
+	    schedtune_prefer_perf(p) <= 0)
+		return -1;
+	return select_perf_cpu(p);
+}
+#endif
