@@ -38,6 +38,7 @@ struct boost_drv {
 	struct work_struct boost_work;
 	struct delayed_work unboost_work;
 	struct kobject *kobj;
+	struct wake_lock wlock;
 	atomic_t state;
 	unsigned int duration_ms;
 };
