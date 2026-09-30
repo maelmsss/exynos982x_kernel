@@ -360,6 +360,8 @@ static int __init cpu_fp_init(void)
 	pr_info("initialized (duration=%u ms)\n", b->duration_ms);
 	return 0;
 
+err_notif:
+	cpufreq_unregister_notifier(&do_cpu_boost_nb, CPUFREQ_POLICY_NOTIFIER);
 err_sysfs:
 	sysfs_remove_group(b->kobj, &fp_boost_attr_group);
 err_kobj:
