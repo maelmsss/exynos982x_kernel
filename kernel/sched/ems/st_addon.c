@@ -139,7 +139,7 @@ extern uint sched_bore;
 static bool bore_in_ux_cpuset(struct task_struct *p)
 {
 	struct cgroup_subsys_state *css;
-	const char *name;
+	char name[32];
 
 	if (schedtune_prefer_idle(p) > 0 ||
 	    schedtune_prefer_perf(p) > 0)
@@ -149,8 +149,7 @@ static bool bore_in_ux_cpuset(struct task_struct *p)
 	css = task_css(p, cpuset_cgrp_id);
 	if (!css || !css->cgroup)
 		return false;
-	name = cgroup_name(css->cgroup);
-	if (!name)
+	if (cgroup_name(css->cgroup, name, sizeof(name)) <= 0)
 		return false;
 	return !strcmp(name, "top-app") ||
 	       !strcmp(name, "foreground") ||
