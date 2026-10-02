@@ -881,6 +881,8 @@ static int hiu_dt_parsing(struct device_node *dn)
 	ret |= of_property_read_u32(dn, "boot-freq", &data->cur_freq);
 	ret |= of_property_read_u32(dn, "boost-threshold", &data->boost_threshold);
 	ret |= of_property_read_u32(dn, "boost-max", &data->boost_max);
+	if (data->boost_max < 2530000)
+		data->boost_max = 2530000;
 	ret |= of_property_read_u32(dn, "sw-pbl", &data->sw_pbl);
 	ret |= of_property_read_string(dn, "sibling-cpus", &buf);
 	if (ret)
