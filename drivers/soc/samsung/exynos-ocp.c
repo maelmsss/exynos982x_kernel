@@ -752,6 +752,8 @@ static int ocp_dt_parsing(struct device_node *dn)
 
 	ret |= of_property_read_u32(dn, "down-step", &data->down_step);
 	ret |= of_property_read_u32(dn, "max-freq-wo-ocp", &data->max_freq_wo_ocp);
+	if (data->max_freq_wo_ocp < 2530000)
+		data->max_freq_wo_ocp = 2530000;
 	ret |= of_property_read_u32(dn, "release-mode", &data->release_mode);
 	ret |= of_property_read_u32(dn, "release-threshold", &data->release_threshold);
 	ret |= of_property_read_u32(dn, "release-duration", &data->release_duration);
