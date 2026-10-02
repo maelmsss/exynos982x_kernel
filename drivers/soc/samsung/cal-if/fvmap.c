@@ -18,9 +18,15 @@
 void __iomem *fvmap_base;
 void __iomem *sram_fvmap_base;
 
-static int init_margin_table[MAX_MARGIN_ID];
+static int init_margin_table[MAX_MARGIN_ID] = {
+	[MARGIN_BIG] = -5,
+	[MARGIN_MID] = -5,
+};
 static int volt_offset_percent = 0;
-static int percent_margin_table[MAX_MARGIN_ID];
+static int percent_margin_table[MAX_MARGIN_ID] = {
+	[MARGIN_BIG] = -5,
+	[MARGIN_MID] = -5,
+};
 
 static int __init get_mif_volt(char *str)
 {
