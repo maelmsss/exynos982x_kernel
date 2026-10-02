@@ -1328,6 +1328,7 @@ static __init int init_domain(struct exynos_cpufreq_domain *domain,
 	 * tree and CAL. In case of min-freq, min frequency is selected
 	 * to bigger one.
 	 */
+#define CL2_MAX_KHZ	2530000
 	if (!of_property_read_u32(dn, "max-freq", &val)) {
 		if (cpumask_test_cpu(6, &domain->cpus)) {
 			if (domain->max_freq > CL2_MAX_KHZ)
