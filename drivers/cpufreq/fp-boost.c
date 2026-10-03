@@ -370,7 +370,6 @@ err_input:
 	input_unregister_handler(&cpu_fp_input_handler);
 err_wlock:
 	wake_lock_destroy(&b->wlock);
-err_wq:
 	destroy_workqueue(b->wq);
 err_free:
 	kfree(b);
