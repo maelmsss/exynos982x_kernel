@@ -13,6 +13,7 @@
 
 #include "fingerprint.h"
 #include "qbt2000_common.h"
+#include <linux/fp_boost.h>
 
 static struct qbt2000_drvdata *g_data = NULL;
 
@@ -1046,7 +1047,15 @@ static irqreturn_t qbt2000_wuhb_irq_handler(int irq, void *dev_id)
 		drvdata->wuhb_test_result = 1;
 		return IRQ_HANDLED;
 	}
-
+	
+	{
+		int st = (__gpio_get_value(drvdata->fd_gpio.gpio) ?
+			  FINGER_DOWN_GPIO_STATE : FINGER_LEAVE_GPIO_STATE)
+			 ^ drvdata->fd_gpio.active_low;
+		if (st == FINGER_DOWN_GPIO_STATE)
+			fp_boost_kick();
+	}
+	
 	drvdata->wuhb_count++;
 	wake_lock_timeout(&drvdata->fp_signal_lock,
 			msecs_to_jiffies(QBT2000_WAKELOCK_HOLD_TIME));

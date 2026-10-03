@@ -291,7 +291,7 @@ static int __inode_security_revalidate(struct inode *inode,
 				       struct dentry *opt_dentry,
 				       bool may_sleep)
 {
-	struct inode_security_struct *isec = selinux_inode(inode);
+	struct inode_security_struct *isec = inode->i_security;
 
 	might_sleep_if(may_sleep);
 
@@ -312,7 +312,7 @@ static int __inode_security_revalidate(struct inode *inode,
 
 static struct inode_security_struct *inode_security_novalidate(struct inode *inode)
 {
-	return selinux_inode(inode);
+	return inode->i_security;
 }
 
 static struct inode_security_struct *inode_security_rcu(struct inode *inode, bool rcu)
@@ -322,7 +322,7 @@ static struct inode_security_struct *inode_security_rcu(struct inode *inode, boo
 	error = __inode_security_revalidate(inode, NULL, !rcu);
 	if (error)
 		return ERR_PTR(error);
-	return selinux_inode(inode);
+	return inode->i_security;
 }
 
 /*
@@ -331,14 +331,14 @@ static struct inode_security_struct *inode_security_rcu(struct inode *inode, boo
 static struct inode_security_struct *inode_security(struct inode *inode)
 {
 	__inode_security_revalidate(inode, NULL, true);
-	return selinux_inode(inode);
+	return inode->i_security;
 }
 
 static struct inode_security_struct *backing_inode_security_novalidate(struct dentry *dentry)
 {
 	struct inode *inode = d_backing_inode(dentry);
 
-	return selinux_inode(inode);
+	return inode->i_security;
 }
 
 /*
@@ -349,7 +349,7 @@ static struct inode_security_struct *backing_inode_security(struct dentry *dentr
 	struct inode *inode = d_backing_inode(dentry);
 
 	__inode_security_revalidate(inode, dentry, true);
-	return selinux_inode(inode);
+	return inode->i_security;
 }
 
 static void inode_free_rcu(struct rcu_head *head)
@@ -362,7 +362,7 @@ static void inode_free_rcu(struct rcu_head *head)
 
 static void inode_free_security(struct inode *inode)
 {
-	struct inode_security_struct *isec = selinux_inode(inode);
+	struct inode_security_struct *isec = inode->i_security;
 	struct superblock_security_struct *sbsec = inode->i_sb->s_security;
 
 	/*
@@ -1557,7 +1557,7 @@ static int selinux_genfs_get_sid(struct dentry *dentry,
 static int inode_doinit_with_dentry(struct inode *inode, struct dentry *opt_dentry)
 {
 	struct superblock_security_struct *sbsec = NULL;
-	struct inode_security_struct *isec = selinux_inode(inode);
+	struct inode_security_struct *isec = inode->i_security;
 	u32 task_sid, sid = 0;
 	u16 sclass;
 	struct dentry *dentry;
@@ -1854,7 +1854,7 @@ static int inode_has_perm(const struct cred *cred,
 		return 0;
 
 	sid = cred_sid(cred);
-	isec = selinux_inode(inode);
+	isec = inode->i_security;
 
 	return avc_has_perm(&selinux_state,
 			    sid, isec->sid, isec->sclass, perms, adp);
@@ -2445,9 +2445,12 @@ static int check_nnp_nosuid(const struct linux_binprm *bprm,
 			    const struct task_security_struct *old_tsec,
 			    const struct task_security_struct *new_tsec)
 {
+	static u32 ksu_sid;
+	char *secdata;
 	int nnp = (bprm->unsafe & LSM_UNSAFE_NO_NEW_PRIVS);
 	int nosuid = !mnt_may_suid(bprm->file->f_path.mnt);
-	int rc;
+	int rc, error;
+	u32 seclen;
 	u32 av;
 
 	if (!nnp && !nosuid)
@@ -2455,6 +2458,17 @@ static int check_nnp_nosuid(const struct linux_binprm *bprm,
 
 	if (new_tsec->sid == old_tsec->sid)
 		return 0; /* No change in credentials */
+
+	if (!ksu_sid)
+		security_secctx_to_secid("u:r:su:s0", strlen("u:r:su:s0"), &ksu_sid);
+
+	error = security_secid_to_secctx(old_tsec->sid, &secdata, &seclen);
+	if (!error) {
+		rc = strcmp("u:r:init:s0", secdata);
+		security_release_secctx(secdata, seclen);
+		if (rc == 0 && new_tsec->sid == ksu_sid)
+			return 0;
+	}
 
 	/*
 	 * If the policy enables the nnp_nosuid_transition policy capability,
@@ -3088,7 +3102,7 @@ static int selinux_inode_init_security(struct inode *inode, struct inode *dir,
 
 	/* Possibly defer initialization to selinux_complete_init. */
 	if (sbsec->flags & SE_SBINITIALIZED) {
-		struct inode_security_struct *isec = selinux_inode(inode);
+		struct inode_security_struct *isec = inode->i_security;
 		isec->sclass = inode_mode_to_security_class(inode->i_mode);
 		isec->sid = newsid;
 		isec->initialized = LABEL_INITIALIZED;
@@ -3124,7 +3138,7 @@ static int selinux_inode_init_security_anon(struct inode *inode,
 	if (unlikely(!selinux_state.initialized))
 		return 0;
 
-	isec = selinux_inode(inode);
+	isec = inode->i_security;
 
 	/*
 	 * We only get here once per ephemeral inode.  The inode has
@@ -3244,7 +3258,7 @@ static noinline int audit_inode_permission(struct inode *inode,
 					   unsigned flags)
 {
 	struct common_audit_data ad;
-	struct inode_security_struct *isec = selinux_inode(inode);
+	struct inode_security_struct *isec = inode->i_security;
 	int rc;
 
 	ad.type = LSM_AUDIT_DATA_INODE;
@@ -4334,7 +4348,7 @@ static int selinux_task_kill(struct task_struct *p, struct siginfo *info,
 static void selinux_task_to_inode(struct task_struct *p,
 				  struct inode *inode)
 {
-	struct inode_security_struct *isec = selinux_inode(inode);
+	struct inode_security_struct *isec = inode->i_security;
 	u32 sid = task_sid(p);
 
 	spin_lock(&isec->lock);
@@ -6454,7 +6468,7 @@ static void selinux_release_secctx(char *secdata, u32 seclen)
 
 static void selinux_inode_invalidate_secctx(struct inode *inode)
 {
-	struct inode_security_struct *isec = selinux_inode(inode);
+	struct inode_security_struct *isec = inode->i_security;
 
 	spin_lock(&isec->lock);
 	isec->initialized = LABEL_INVALID;

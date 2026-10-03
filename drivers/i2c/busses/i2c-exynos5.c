@@ -766,15 +766,16 @@ static int exynos5_i2c_xfer_msg(struct exynos5_i2c *i2c,
 
 	if (operation_mode == HSI2C_INTERRUPT) {
 		unsigned int cpu = raw_smp_processor_id();
+		
 		i2c_int_en |= HSI2C_INT_CHK_TRANS_STATE | HSI2C_INT_TRANSFER_DONE;
 		writel(i2c_int_en, i2c->regs + HSI2C_INT_ENABLE);
-
+		
 		irq_force_affinity(i2c->irq, cpumask_of(cpu));
 		enable_irq(i2c->irq);
 	} else {
 		writel(HSI2C_INT_TRANSFER_DONE, i2c->regs + HSI2C_INT_ENABLE);
 	}
-
+	
 	i2c_auto_conf &= ~(0xffff);
 	i2c_auto_conf |= i2c->msg->len;
 	writel(i2c_auto_conf, i2c->regs + HSI2C_AUTO_CONF);

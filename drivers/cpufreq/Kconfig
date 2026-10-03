@@ -245,9 +245,13 @@ config CPUFREQ_DT_PLATDEV
 
 config FINGERPRINT_BOOST
 	bool "Fingerprint Boost"
+	depends on INPUT
 	default n
 	help
-	  Boosts available CPUs to max frequency on fingerprint sensor input.
+	  Boost all CPU clusters to max frequency on fingerprint
+	  finger-down. Speeds up unlock from deep sleep.
+	  Sysfs: /sys/kernel/fp_boost/
+	  If unsure, say N.
 
 config CPUFREQ_DUMMY
 	tristate "Dummy CPU frequency driver"
