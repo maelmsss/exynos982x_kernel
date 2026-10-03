@@ -675,7 +675,9 @@ static int hiu_dt_parsing(struct device_node *dn)
 
 	if (!of_property_read_u32(dn, "cal-id", &data->cal_id))
 		val = cal_dfs_get_max_freq(data->cal_id);
-	data->boost_max = min(val, 2530000u);
+	if (of_property_read_u32(dn, "boost-max", &data->boost_max))
+		data->boost_max = UINT_MAX;
+	data->boost_max = min(val, data->boost_max);
 	if (data->boost_max == UINT_MAX)
 		return -ENODEV;
 
