@@ -185,7 +185,7 @@ static void update_burst_score(struct sched_entity *se)
 
     se->burst_score = se->burst_penalty >> 2;
     score = sched_bore ? se->burst_score : 0;
-    new_prio = min(39, (unsigned int)prio + score);
+    new_prio = min_t(u8, 39, prio + score);
 
     if (new_prio != prev_prio)
         reweight_task_bore(p, new_prio);
