@@ -29,11 +29,6 @@ static int percent_margin_table[MAX_MARGIN_ID] = {
 	[MARGIN_G3D] = -3,
 };
 
-static int percent_margin_table[MAX_MARGIN_ID] = {
-	[MARGIN_BIG] = -5,
-	[MARGIN_MID] = -5,
-	[MARGIN_G3D] = -3,
-};
 static int volt_offset_percent;
 
 static int __init get_mif_volt(char *str)
