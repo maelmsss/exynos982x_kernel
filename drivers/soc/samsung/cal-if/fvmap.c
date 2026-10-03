@@ -88,7 +88,7 @@ static int __init get_g3d_volt(char *str)
 	int volt;
 
 	get_option(&str, &volt);
-	init_margin_table[MARGIN_G3D] = volt;
+	init_margin_table[MARGIN_G3D] = -3;
 
 	return 0;
 }
