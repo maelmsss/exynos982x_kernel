@@ -249,6 +249,9 @@ int elevator_init(struct request_queue *q, char *name)
 		}
 	}
 
+	if (!e)
+	return -EINVAL;
+
 	if (e->uses_mq)
 		err = blk_mq_init_sched(q, e);
 	else
