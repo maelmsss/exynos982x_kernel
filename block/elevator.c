@@ -233,7 +233,7 @@ int elevator_init(struct request_queue *q, char *name)
 			    q->tag_set->flags & BLK_MQ_F_NO_SCHED_BY_DEFAULT)
 				return 0;
 
-			e = elevator_get(q, "mq-deadline", false);
+			e = elevator_get(q, "ssg", false);
 			if (!e)
 				e = elevator_get(q, "kyber", false);
 			if (!e)
