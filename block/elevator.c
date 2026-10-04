@@ -60,6 +60,9 @@ static int elv_iosched_allow_bio_merge(struct request *rq, struct bio *bio)
 	struct request_queue *q = rq->q;
 	struct elevator_queue *e = q->elevator;
 
+	if (!e)
+	return -EINVAL;
+
 	if (e->uses_mq && e->type->ops.mq.allow_merge)
 		return e->type->ops.mq.allow_merge(q, rq, bio);
 	else if (!e->uses_mq && e->type->ops.sq.elevator_allow_bio_merge_fn)
