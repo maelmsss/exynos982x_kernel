@@ -373,20 +373,25 @@ static void hystart_update(struct sock *sk, u32 delay)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct bictcp *ca = inet_csk_ca(sk);
+	u32 threshold;
 
 	if (ca->found & hystart_detect)
 		return;
 
-	if (after(tp->snd_una, ca->end_seq))
-		bictcp_hystart_reset(sk);
+	if (tp->snd_cwnd < hystart_low_window)
+		return;
 
 	if (hystart_detect & HYSTART_ACK_TRAIN) {
 		u32 now = bictcp_clock();
 
-		/* first detection parameter - ack-train detection */
-		if ((s32)(now - ca->last_ack) <= hystart_ack_delta) {
+		if (!tcp_is_cwnd_limited(sk)) {
 			ca->last_ack = now;
-			if ((s32)(now - ca->round_start) > ca->delay_min >> 4) {
+		} else if ((s32)(now - ca->last_ack) <= hystart_ack_delta) {
+			ca->last_ack = now;
+			threshold = ((ca->delay_min >> 3) * USEC_PER_MSEC) >> 1;
+			if (sk->sk_pacing_status != SK_PACING_NONE)
+				threshold <<= 1;
+			if ((s32)(now - ca->round_start) > threshold) {
 				ca->found |= HYSTART_ACK_TRAIN;
 				NET_INC_STATS(sock_net(sk),
 					      LINUX_MIB_TCPHYSTARTTRAINDETECT);
@@ -399,25 +404,21 @@ static void hystart_update(struct sock *sk, u32 delay)
 	}
 
 	if (hystart_detect & HYSTART_DELAY) {
-		/* obtain the minimum delay of more than sampling packets */
 		if (ca->curr_rtt > delay)
 			ca->curr_rtt = delay;
 		if (ca->sample_cnt < HYSTART_MIN_SAMPLES) {
 			if (ca->curr_rtt == 0 || ca->curr_rtt > delay)
 				ca->curr_rtt = delay;
-
 			ca->sample_cnt++;
-		} else {
-			if (ca->curr_rtt > ca->delay_min +
-			    HYSTART_DELAY_THRESH(ca->delay_min >> 3)) {
-				ca->found |= HYSTART_DELAY;
-				NET_INC_STATS(sock_net(sk),
-					      LINUX_MIB_TCPHYSTARTDELAYDETECT);
-				NET_ADD_STATS(sock_net(sk),
-					      LINUX_MIB_TCPHYSTARTDELAYCWND,
-					      tp->snd_cwnd);
-				tp->snd_ssthresh = tp->snd_cwnd;
-			}
+		} else if (ca->curr_rtt > ca->delay_min +
+			   HYSTART_DELAY_THRESH(ca->delay_min >> 3)) {
+			ca->found |= HYSTART_DELAY;
+			NET_INC_STATS(sock_net(sk),
+				      LINUX_MIB_TCPHYSTARTDELAYDETECT);
+			NET_ADD_STATS(sock_net(sk),
+				      LINUX_MIB_TCPHYSTARTDELAYCWND,
+				      tp->snd_cwnd);
+			tp->snd_ssthresh = tp->snd_cwnd;
 		}
 	}
 }
