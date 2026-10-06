@@ -445,14 +445,16 @@ static void bictcp_acked(struct sock *sk, const struct ack_sample *sample)
 		delay = 1;
 
 	/* first time call or link delay decreases */
-	if (ca->delay_min == 0 || ca->delay_min > delay)
+		if (ca->delay_min == 0 || ca->delay_min > delay) {
 		ca->delay_min = delay;
+		return;
+	}
 
-	/* hystart triggers when cwnd is larger than some threshold */
-	if (hystart && tcp_in_slow_start(tp) &&
-	    tp->snd_cwnd >= hystart_low_window)
+	if (hystart && tcp_in_slow_start(tp)) {
+		if (after(tp->snd_una, ca->end_seq))
+			bictcp_hystart_reset(sk);
 		hystart_update(sk, delay);
-}
+	}
 
 static struct tcp_congestion_ops cubictcp __read_mostly = {
 	.init		= bictcp_init,
