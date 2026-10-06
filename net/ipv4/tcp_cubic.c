@@ -118,11 +118,7 @@ static inline void bictcp_reset(struct bictcp *ca)
 
 static inline u32 bictcp_clock(void)
 {
-#if HZ < 1000
-	return ktime_to_ms(ktime_get_real());
-#else
-	return jiffies_to_msecs(jiffies);
-#endif
+	return ktime_to_us(ktime_get());
 }
 
 static inline void bictcp_hystart_reset(struct sock *sk)
