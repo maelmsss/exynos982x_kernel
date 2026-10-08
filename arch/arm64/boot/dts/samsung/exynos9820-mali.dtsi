@@ -10,7 +10,7 @@
 */
 
 &mali {
-	interactive_info = <260000 94 0>;
+	interactive_info = <572000 75 0>;
 	gpu_dvfs_table_size = <9 8>; /*<row col>*/
 	/*  8 columns      freq  down   up  stay  mif    little  middle   big  */
 	gpu_dvfs_table = <  702000    78  100   9  2093000 1456000       0 1820000
