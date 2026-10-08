@@ -558,7 +558,7 @@ module_param(dhd_console_ms, uint, 0644);
 uint dhd_console_ms = 0;
 #endif /* DHD_DEBUG */
 
-uint dhd_slpauto = TRUE;
+uint dhd_slpauto = FALSE;
 module_param(dhd_slpauto, uint, 0);
 
 #ifdef PKT_FILTER_SUPPORT
