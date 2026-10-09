@@ -1080,6 +1080,7 @@ static __init int init_table(struct exynos_cpufreq_domain *domain)
 
 				dev_pm_opp_add(get_cpu_device(cpu),
 						table[index] * 1000, volt_table[index]);
+				pr_info("volt_table[%d]=%d\n", index, volt_table[index]);
 			}
 		}
 

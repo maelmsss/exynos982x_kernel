@@ -3673,11 +3673,11 @@ static void sd_shutdown(struct device *dev)
 	struct scsi_disk *sdkp = dev_get_drvdata(dev);
 	struct scsi_device *sdp = to_scsi_device(dev);
 	struct request_queue *q = sdp->request_queue;
-	struct scsi_host_template * sht = sdp->host->hostt;
+	struct scsi_host_template *sht = sdp->host->hostt;
 	unsigned long flags;
 
 	if (!sdkp)
-		return;         /* this can happen */
+		return;
 
 	if (pm_runtime_suspended(dev))
 		return;
@@ -3692,7 +3692,12 @@ static void sd_shutdown(struct device *dev)
 		sd_start_stop_device(sdkp, 0);
 	}
 
-	if(!strncmp(sht->name, "ufshcd", 6)) {
+	/*
+	 * Legacy SQ drain is fatal on blk-mq UFS (Note10+/9825).
+	 * On SYSTEM_RESTART the machine is going down anyway.
+	 */
+	if (system_state != SYSTEM_RESTART &&
+	    !strncmp(sht->name, "ufshcd", 6) && !q->mq_ops) {
 		spin_lock_irqsave(q->queue_lock, flags);
 		queue_flag_set(QUEUE_FLAG_DYING, q);
 		__blk_drain_queue(q, true);

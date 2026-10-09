@@ -52,7 +52,7 @@ static int tcp_friendliness __read_mostly = 1;
 static int hystart __read_mostly = 1;
 static int hystart_detect __read_mostly = HYSTART_ACK_TRAIN | HYSTART_DELAY;
 static int hystart_low_window __read_mostly = 16;
-static int hystart_ack_delta __read_mostly = 2;
+static int hystart_ack_delta __read_mostly = 2000;
 
 static u32 cube_rtt_scale __read_mostly;
 static u32 beta_scale __read_mostly;
@@ -118,11 +118,7 @@ static inline void bictcp_reset(struct bictcp *ca)
 
 static inline u32 bictcp_clock(void)
 {
-#if HZ < 1000
-	return ktime_to_ms(ktime_get_real());
-#else
-	return jiffies_to_msecs(jiffies);
-#endif
+	return ktime_to_us(ktime_get());
 }
 
 static inline void bictcp_hystart_reset(struct sock *sk)
@@ -377,20 +373,25 @@ static void hystart_update(struct sock *sk, u32 delay)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct bictcp *ca = inet_csk_ca(sk);
+	u32 threshold;
 
 	if (ca->found & hystart_detect)
 		return;
 
-	if (after(tp->snd_una, ca->end_seq))
-		bictcp_hystart_reset(sk);
+	if (tp->snd_cwnd < hystart_low_window)
+		return;
 
 	if (hystart_detect & HYSTART_ACK_TRAIN) {
 		u32 now = bictcp_clock();
 
-		/* first detection parameter - ack-train detection */
-		if ((s32)(now - ca->last_ack) <= hystart_ack_delta) {
+		if (!tcp_is_cwnd_limited(sk)) {
 			ca->last_ack = now;
-			if ((s32)(now - ca->round_start) > ca->delay_min >> 4) {
+		} else if ((s32)(now - ca->last_ack) <= hystart_ack_delta) {
+			ca->last_ack = now;
+			threshold = ((ca->delay_min >> 3) * USEC_PER_MSEC) >> 1;
+			if (sk->sk_pacing_status != SK_PACING_NONE)
+				threshold <<= 1;
+			if ((s32)(now - ca->round_start) > threshold) {
 				ca->found |= HYSTART_ACK_TRAIN;
 				NET_INC_STATS(sock_net(sk),
 					      LINUX_MIB_TCPHYSTARTTRAINDETECT);
@@ -403,25 +404,21 @@ static void hystart_update(struct sock *sk, u32 delay)
 	}
 
 	if (hystart_detect & HYSTART_DELAY) {
-		/* obtain the minimum delay of more than sampling packets */
 		if (ca->curr_rtt > delay)
 			ca->curr_rtt = delay;
 		if (ca->sample_cnt < HYSTART_MIN_SAMPLES) {
 			if (ca->curr_rtt == 0 || ca->curr_rtt > delay)
 				ca->curr_rtt = delay;
-
 			ca->sample_cnt++;
-		} else {
-			if (ca->curr_rtt > ca->delay_min +
-			    HYSTART_DELAY_THRESH(ca->delay_min >> 3)) {
-				ca->found |= HYSTART_DELAY;
-				NET_INC_STATS(sock_net(sk),
-					      LINUX_MIB_TCPHYSTARTDELAYDETECT);
-				NET_ADD_STATS(sock_net(sk),
-					      LINUX_MIB_TCPHYSTARTDELAYCWND,
-					      tp->snd_cwnd);
-				tp->snd_ssthresh = tp->snd_cwnd;
-			}
+		} else if (ca->curr_rtt > ca->delay_min +
+			   HYSTART_DELAY_THRESH(ca->delay_min >> 3)) {
+			ca->found |= HYSTART_DELAY;
+			NET_INC_STATS(sock_net(sk),
+				      LINUX_MIB_TCPHYSTARTDELAYDETECT);
+			NET_ADD_STATS(sock_net(sk),
+				      LINUX_MIB_TCPHYSTARTDELAYCWND,
+				      tp->snd_cwnd);
+			tp->snd_ssthresh = tp->snd_cwnd;
 		}
 	}
 }
@@ -448,13 +445,16 @@ static void bictcp_acked(struct sock *sk, const struct ack_sample *sample)
 		delay = 1;
 
 	/* first time call or link delay decreases */
-	if (ca->delay_min == 0 || ca->delay_min > delay)
+		if (ca->delay_min == 0 || ca->delay_min > delay) {
 		ca->delay_min = delay;
+		return;
+	}
 
-	/* hystart triggers when cwnd is larger than some threshold */
-	if (hystart && tcp_in_slow_start(tp) &&
-	    tp->snd_cwnd >= hystart_low_window)
+	if (hystart && tcp_in_slow_start(tp)) {
+		if (after(tp->snd_una, ca->end_seq))
+			bictcp_hystart_reset(sk);
 		hystart_update(sk, delay);
+	}
 }
 
 static struct tcp_congestion_ops cubictcp __read_mostly = {
