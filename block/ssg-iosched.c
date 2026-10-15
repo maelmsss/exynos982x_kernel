@@ -707,16 +707,19 @@ static void ssg_prepare_request(struct request *rq, struct bio *bio)
  * Request has finished. Thread-group and cgroup counters live only for
  * ELVPRIV requests. Zoned unlock is not used on 4.14.
  */
+
 static void ssg_finish_request(struct request *rq)
 {
 	struct request_queue *q = rq->q;
 	struct ssg_data *ssg = q->elevator->elevator_data;
 	struct ssg_request_info *rqi;
 
+	atomic_dec(&ssg->allocated_rqs);
+	if (ssg_op_is_async_write(rq->cmd_flags))
+		atomic_dec(&ssg->async_write_rqs);
+
 	if (unlikely(!(rq->rq_flags & RQF_ELVPRIV)))
 		return;
-
-	atomic_dec(&ssg->allocated_rqs);
 
 	rqi = ssg_rq_info(ssg, rq);
 	if (likely(rqi)) {
@@ -724,9 +727,6 @@ static void ssg_finish_request(struct request *rq)
 		ssg_blkcg_dec_rq(rqi->blkg);
 		rqi->blkg = NULL;
 	}
-
-	if (ssg_op_is_async_write(rq->cmd_flags))
-		atomic_dec(&ssg->async_write_rqs);
 }
 
 static bool ssg_has_work(struct blk_mq_hw_ctx *hctx)
