@@ -319,8 +319,7 @@ static struct request *__ssg_dispatch_request(struct ssg_data *ssg)
 		BUG_ON(RB_EMPTY_ROOT(&ssg->sort_list[READ]));
 
 		if (ssg_fifo_request(ssg, WRITE) &&
-		    !ssg_check_fifo(ssg, READ) &&
-			(ssg->starved_writes++ >= ssg->max_write_starvation))
+		    (ssg->starved_writes++ >= ssg->max_write_starvation))
 			goto dispatch_writes;
 
 		data_dir = READ;
