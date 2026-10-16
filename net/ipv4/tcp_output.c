@@ -3455,6 +3455,7 @@ static void tcp_connect_init(struct sock *sk)
 	tcp_sync_mss(sk, dst_mtu(dst));
 
 	tcp_ca_dst_init(sk, dst);
+	tcp_cong_by_dev(sk);
 
 	if (!tp->window_clamp)
 		tp->window_clamp = dst_metric(dst, RTAX_WINDOW);
