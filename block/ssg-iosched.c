@@ -496,8 +496,14 @@ static unsigned int ssg_tgroup_shallow_depth(struct blk_mq_alloc_data *data)
 static void ssg_limit_depth(unsigned int op, struct blk_mq_alloc_data *data)
 {
 	struct ssg_data *ssg = data->q->elevator->elevator_data;
-	unsigned int shallow_depth = ssg_blkcg_shallow_depth(data->q);
+	unsigned int shallow_depth;
 
+	if ((op & REQ_OP_MASK) == REQ_OP_READ) {
+		data->shallow_depth = 0;
+		return;
+	}
+
+	shallow_depth = ssg_blkcg_shallow_depth(data->q);
 	shallow_depth = min_not_zero(shallow_depth,
 			ssg_async_write_shallow_depth(op, data));
 
