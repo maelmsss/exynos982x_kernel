@@ -3354,14 +3354,53 @@ struct sk_buff *tcp_make_synack(const struct sock *sk, struct dst_entry *dst,
 }
 EXPORT_SYMBOL(tcp_make_synack);
 
+static u32 tcp_ca_key_by_name(const char *name)
+{
+	char buf[TCP_CA_NAME_MAX] = { };
+
+	strlcpy(buf, name, sizeof(buf));
+	return jhash(buf, sizeof(buf), strlen(buf));
+}
+
+static void tcp_ca_pick_by_dev(struct sock *sk, const struct dst_entry *dst)
+{
+	struct inet_connection_sock *icsk = inet_csk(sk);
+	const struct tcp_congestion_ops *ca;
+	const char *pick = NULL;
+	const char *devn;
+	u32 key;
+
+	if (icsk->icsk_ca_setsockopt || !dst->dev)
+		return;
+
+	devn = dst->dev->name;
+	if (!strncmp(devn, "wlan", 4))
+		pick = "bbr";
+	else if (!strncmp(devn, "rmnet", 5))
+		pick = "cubic";
+	else
+		return;
+
+	key = tcp_ca_key_by_name(pick);
+	rcu_read_lock();
+	ca = tcp_ca_find_key(key);
+	if (ca && ca != icsk->icsk_ca_ops && try_module_get(ca->owner)) {
+		module_put(icsk->icsk_ca_ops->owner);
+		icsk->icsk_ca_ops = ca;
+	}
+	rcu_read_unlock();
+}
+
 static void tcp_ca_dst_init(struct sock *sk, const struct dst_entry *dst)
 {
 	struct inet_connection_sock *icsk = inet_csk(sk);
 	const struct tcp_congestion_ops *ca;
 	u32 ca_key = dst_metric(dst, RTAX_CC_ALGO);
 
-	if (ca_key == TCP_CA_UNSPEC)
+	if (ca_key == TCP_CA_UNSPEC) {
+		tcp_ca_pick_by_dev(sk, dst);
 		return;
+	}
 
 	rcu_read_lock();
 	ca = tcp_ca_find_key(ca_key);
