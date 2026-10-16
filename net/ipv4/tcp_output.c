@@ -3410,6 +3410,21 @@ static void tcp_ca_dst_init(struct sock *sk, const struct dst_entry *dst)
 		icsk->icsk_ca_ops = ca;
 	}
 	rcu_read_unlock();
+	
+}
+static void tcp_cong_by_dev(struct sock *sk)
+{
+	const struct dst_entry *dst = __sk_dst_get(sk);
+	const char *name;
+
+	if (inet_csk(sk)->icsk_ca_setsockopt || !dst || !dst->dev)
+		return;
+
+	name = dst->dev->name;
+	if (strncmp(name, "wlan", 4) && strncmp(name, "p2p", 3))
+		return;
+
+	tcp_set_congestion_control(sk, "bbr", false, true, true);
 }
 
 /* Do all connect socket setups that can be done AF independent. */
