@@ -205,9 +205,13 @@ static int set_freq(struct exynos_cpufreq_domain *domain,
 	if (domain->need_awake)
 		disable_power_mode(cpumask_any(&domain->cpus), POWERMODE_TYPE_CLUSTER);
 
+	exynos9820_uv_prepare_cpu(domain->cal_id, domain->old, target_freq);
+
 	/* check target freq is available */
 	emc_check_available_freq(&domain->cpus, target_freq);
 	err = cal_dfs_set_rate(domain->cal_id, target_freq);
+	exynos9820_uv_finish_cpu(domain->cal_id,
+			err < 0 ? domain->old : target_freq);
 	if (err < 0)
 		pr_err("failed to scale frequency of domain%d (%d -> %d)\n",
 			domain->id, domain->old, target_freq);

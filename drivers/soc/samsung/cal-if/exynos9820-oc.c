@@ -9,7 +9,9 @@
  * Either path aborts unless the firmware table matches. A missing 3016
  * row does not leave the M4 at the 2080 DTS cap: the highest fused rate
  * already in the table is used instead, and the -5% big margin stays.
- * The margin is dropped only when a stretched row (2912/3016) really arms.
+ * A 2912/3016 row keeps its own voltage only while that clock is selected.
+ * Every slower big clock keeps the -5% margin. GPU does the same: -3%
+ * below the rewritten top, and the old top voltage at 806 MHz.
  * No rail value is invented.
  */
 
@@ -34,6 +36,7 @@ static void __iomem *oc_sram;
 static bool cpucl2_oc_requested;
 static bool cpucl2_oc_enabled;
 static bool cpucl2_keep_uv = true;
+static bool cpucl2_uv_switch;
 static unsigned int cpucl2_oc_target = EXYNOS9820_M4_OC_KHZ;
 static unsigned int cpucl2_stock_khz;
 static unsigned int cpucl2_target_uv;
@@ -142,18 +145,6 @@ static int margin_vclk_id(int margin_id)
 	return -EINVAL;
 }
 
-static bool m4_opp_valid(unsigned int stock_khz, unsigned int target_khz,
-		unsigned int stock_uv, unsigned int target_uv)
-{
-	unsigned int ceiling = target_khz == EXYNOS9820_M4_OC_HIGH_KHZ ?
-		1300000 : 1250000;
-
-	return stock_khz == EXYNOS9820_M4_STOCK_KHZ &&
-		m4_target_valid(target_khz) &&
-		stock_uv >= 500000 && stock_uv <= 1250000 &&
-		target_uv >= stock_uv && target_uv <= ceiling;
-}
-
 static struct vclk *oc_domain(unsigned int margin_id, struct rate_volt_header **rates,
 		const char **status)
 {
@@ -232,13 +223,16 @@ static void init_cpu_oc(void)
 	}
 	idx = m4_target_valid(cpucl2_oc_target) ?
 		rate_index(rates, levels, cpucl2_oc_target) : -1;
-	if (idx >= 0 && m4_opp_valid(top_khz, cpucl2_oc_target, top_uv,
-				     rates->table[idx].volt)) {
+	if (idx >= 0 && rates->table[idx].volt >= 500000 &&
+	    rates->table[idx].volt <= 1300000 &&
+	    rates->table[idx].volt >= top_uv &&
+	    cpucl2_oc_target > EXYNOS9820_M4_STOCK_KHZ) {
 		vclk->max_freq = cpucl2_oc_target;
 		cpucl2_target_uv = rates->table[idx].volt;
 		cpucl2_oc_enabled = true;
-		cpucl2_keep_uv = false;
-		cpucl2_status = "enabled-stretched";
+		cpucl2_keep_uv = true;
+		cpucl2_uv_switch = true;
+		cpucl2_status = "enabled-on-demand";
 	} else if (top_khz >= 2400000 && top_khz <= EXYNOS9820_M4_STOCK_KHZ) {
 		cpucl2_oc_target = top_khz;
 		cpucl2_oc_enabled = true;
@@ -317,6 +311,23 @@ unsigned int exynos9820_gpu_oc_rate(unsigned int original_khz)
 	if (gpu_oc_enabled && original_khz == gpu_oc_from)
 		return gpu_oc_requested;
 	return original_khz;
+}
+
+bool exynos9820_cpu_margin_for_freq(unsigned int margin_id, unsigned int khz,
+		int *percent)
+{
+	if (!percent || margin_id != MARGIN_BIG || !cpucl2_uv_switch)
+		return false;
+	*percent = khz >= cpucl2_oc_target ? 0 : -5;
+	return true;
+}
+
+bool exynos9820_gpu_margin_for_freq(unsigned int khz, int *percent)
+{
+	if (!percent || !gpu_oc_enabled)
+		return false;
+	*percent = khz >= gpu_oc_requested ? 0 : -3;
+	return true;
 }
 
 static void note_ect_gpu(unsigned int from_khz, unsigned int to_khz, u32 pms)

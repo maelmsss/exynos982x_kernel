@@ -22,5 +22,8 @@ int exynos9820_cluster_oc_override(unsigned int id, unsigned int dt_max);
 int exynos9820_m4_oc_override(unsigned int id, unsigned int dt_max);
 unsigned int exynos9820_cluster_oc_thermal_limit(const char *zone,
 		unsigned int range, int temperature, unsigned int limit_khz);
+bool exynos9820_cpu_margin_for_freq(unsigned int margin_id, unsigned int khz,
+		int *percent);
+bool exynos9820_gpu_margin_for_freq(unsigned int khz, int *percent);
 
 #endif
