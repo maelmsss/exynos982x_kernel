@@ -147,11 +147,11 @@ static int set_clock_using_calapi(int clk)
 
 	gpexbe_debug_dbg_snapshot_freq_in(clk_info.cur_clock, clk);
 
+	exynos9820_uv_prepare_gpu(clk_info.cur_clock, clk);
 	gpexbe_clock_set_rate(clk);
-
 	gpexbe_debug_dbg_snapshot_freq_out(clk_info.cur_clock, clk);
-
 	clk_info.cur_clock = gpexbe_clock_get_rate();
+	exynos9820_uv_finish_gpu(clk_info.cur_clock);
 
 	GPU_LOG_DETAILED(MALI_EXYNOS_DEBUG, LSI_CLOCK_VALUE, clk, clk_info.cur_clock,
 			 "clock set: %d, clock get: %d\n", clk, clk_info.cur_clock);

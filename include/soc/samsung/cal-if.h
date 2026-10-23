@@ -109,6 +109,17 @@ extern int cal_if_init(void *);
 
 extern void cal_fimc_is_mclk_control(unsigned int enable, unsigned int num);
 
+unsigned int exynos9820_gpu_oc_rate(unsigned int original_khz);
+int exynos9820_cluster_oc_override(unsigned int id, unsigned int dt_max);
+int exynos9820_m4_oc_override(unsigned int id, unsigned int dt_max);
+unsigned int exynos9820_cluster_oc_thermal_limit(const char *zone,
+		unsigned int range, int temperature, unsigned int limit_khz);
+void exynos9820_uv_prepare_cpu(unsigned int cal_id, unsigned int old_khz,
+		unsigned int new_khz);
+void exynos9820_uv_finish_cpu(unsigned int cal_id, unsigned int khz);
+void exynos9820_uv_prepare_gpu(unsigned int old_khz, unsigned int new_khz);
+void exynos9820_uv_finish_gpu(unsigned int khz);
+
 /* It is for debugging. */
 #define cal_vclk_dbg_info(a)	do{} while(0);
 //extern void cal_vclk_dbg_info(unsigned int id);

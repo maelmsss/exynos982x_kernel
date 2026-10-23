@@ -1387,7 +1387,7 @@ static int sel_make_bools(struct selinux_fs_info *fsi)
 		if (len >= PAGE_SIZE)
 			goto out;
 
-		isec = selinux_inode(inode);
+		isec = (struct inode_security_struct *)inode->i_security;
 		ret = security_genfs_sid(fsi->state, "selinuxfs", page,
 					 SECCLASS_FILE, &sid);
 		if (ret) {
@@ -1900,6 +1900,10 @@ static int sel_make_policycap(struct selinux_fs_info *fsi)
 	sel_remove_entries(fsi->policycap_dir);
 
 	for (iter = 0; iter <= POLICYDB_CAPABILITY_MAX; iter++) {
+		/* Sparse capability indices must not advertise unsupported features. */
+		if (iter < ARRAY_SIZE(selinux_policycap_names) &&
+		    !selinux_policycap_names[iter])
+			continue;
 		if (iter < ARRAY_SIZE(selinux_policycap_names))
 			dentry = d_alloc_name(fsi->policycap_dir,
 					      selinux_policycap_names[iter]);
@@ -2008,7 +2012,7 @@ static int sel_fill_super(struct super_block *sb, void *data, int silent)
 		goto err;
 
 	inode->i_ino = ++fsi->last_ino;
-	isec = selinux_inode(inode);
+	isec = (struct inode_security_struct *)inode->i_security;
 	isec->sid = SECINITSID_DEVNULL;
 	isec->sclass = SECCLASS_CHR_FILE;
 	isec->initialized = LABEL_INITIALIZED;

@@ -205,9 +205,13 @@ static int set_freq(struct exynos_cpufreq_domain *domain,
 	if (domain->need_awake)
 		disable_power_mode(cpumask_any(&domain->cpus), POWERMODE_TYPE_CLUSTER);
 
+	exynos9820_uv_prepare_cpu(domain->cal_id, domain->old, target_freq);
+
 	/* check target freq is available */
 	emc_check_available_freq(&domain->cpus, target_freq);
 	err = cal_dfs_set_rate(domain->cal_id, target_freq);
+	exynos9820_uv_finish_cpu(domain->cal_id,
+			err < 0 ? domain->old : target_freq);
 	if (err < 0)
 		pr_err("failed to scale frequency of domain%d (%d -> %d)\n",
 			domain->id, domain->old, target_freq);
@@ -1080,6 +1084,7 @@ static __init int init_table(struct exynos_cpufreq_domain *domain)
 
 				dev_pm_opp_add(get_cpu_device(cpu),
 						table[index] * 1000, volt_table[index]);
+				pr_info("volt_table[%d]=%d\n", index, volt_table[index]);
 			}
 		}
 
@@ -1324,8 +1329,11 @@ static __init int init_domain(struct exynos_cpufreq_domain *domain,
 	 * tree and CAL. In case of min-freq, min frequency is selected
 	 * to bigger one.
 	 */
-	if (!of_property_read_u32(dn, "max-freq", &val))
-		domain->max_freq = min(domain->max_freq, val);
+	if (!of_property_read_u32(dn, "max-freq", &val)) {
+		if (!exynos9820_cluster_oc_override(domain->cal_id, val) &&
+		    !exynos9820_m4_oc_override(domain->cal_id, val))
+			domain->max_freq = min(domain->max_freq, val);
+	}
 	if (!of_property_read_u32(dn, "min-freq", &val))
 		domain->min_freq = max(domain->min_freq, val);
 
