@@ -450,7 +450,7 @@ static int exynos_ocp_policy_callback(struct notifier_block *nb,
 				unsigned long event, void *info)
 {
 	struct cpufreq_policy *policy = info;
-	unsigned int limit;
+	unsigned int limit, floor;
 
 	if (!data || !data->updated)
 		return NOTIFY_DONE;
@@ -461,8 +461,10 @@ static int exynos_ocp_policy_callback(struct notifier_block *nb,
 	if (event != CPUFREQ_ADJUST)
 		return NOTIFY_DONE;
 
+	floor = exynos9820_oc_cpu_floor();
 	limit = ocp_apply_floor(data->clipped_freq);
-
+	if (floor && policy->max < floor)
+		policy->max = floor;
 	if (policy->max > limit)
 		cpufreq_verify_within_limits(policy, 0, limit);
 
