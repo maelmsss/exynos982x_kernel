@@ -327,7 +327,6 @@ static bool gpu_pms_write(u32 pms)
 		return true;
 	writel(gpu_pms_stock, gpu_pms_slot);
 	wmb();
-	gpu_pms_latched = false;
 	return false;
 }
 
@@ -338,16 +337,44 @@ static bool gpu_is_g3d(unsigned int id)
 	return index >= 0 && id == (ACPM_VCLK_TYPE | index);
 }
 
+/* PLL_CON0_PLL_G3D. DIV_M [25:16], DIV_P [13:8], DIV_S [2:0]. */
+#define G3D_PLL_CON0_PHYS	0x1a240140UL
+#define G3D_PLL_PMS_MASK	0x03ff3f07U
+#define G3D_PLL_STABLE		BIT(29)
+
+static void __iomem *g3d_pll_con0;
+static bool gpu_boost_pending;
+
+static void gpu_pll_apply(u32 pms)
+{
+	u32 con;
+	unsigned int n;
+
+	if (!g3d_pll_con0)
+		g3d_pll_con0 = ioremap(G3D_PLL_CON0_PHYS, 4);
+	if (!g3d_pll_con0)
+		return;
+	con = readl(g3d_pll_con0);
+	con &= ~G3D_PLL_PMS_MASK;
+	con |= pms & G3D_PLL_PMS_MASK;
+	writel(con, g3d_pll_con0);
+	for (n = 0; n < 2000; n++) {
+		if (readl(g3d_pll_con0) & G3D_PLL_STABLE)
+			break;
+		cpu_relax();
+	}
+}
+
 unsigned long exynos9820_gpu_cal_rate(unsigned int id, unsigned long rate)
 {
 	if (!gpu_oc_enabled || !gpu_is_g3d(id))
 		return rate;
 	if (rate == gpu_oc_requested) {
-		if (!gpu_pms_write(gpu_pms_oc))
-			return rate;
-		gpu_pms_latched = true;
+		gpu_pms_write(gpu_pms_oc);
+		gpu_boost_pending = true;
 		return gpu_oc_from;
 	}
+	gpu_boost_pending = false;
 	if (gpu_pms_latched) {
 		gpu_pms_write(gpu_pms_stock);
 		gpu_pms_latched = false;
@@ -355,11 +382,26 @@ unsigned long exynos9820_gpu_cal_rate(unsigned int id, unsigned long rate)
 	return rate;
 }
 
+unsigned long exynos9820_gpu_cal_done(unsigned int id, unsigned long programmed)
+{
+	if (!gpu_is_g3d(id) || !gpu_boost_pending) {
+		gpu_boost_pending = false;
+		return programmed;
+	}
+	gpu_boost_pending = false;
+	gpu_pll_apply(gpu_pms_oc);
+	gpu_pms_latched = true;
+	return gpu_oc_requested;
+}
+
+void exynos9820_gpu_cal_abort(void)
+{
+	gpu_boost_pending = false;
+}
+
 unsigned long exynos9820_gpu_cal_get(unsigned int id, unsigned long rate)
 {
-	if (!gpu_pms_latched || !gpu_is_g3d(id))
-		return rate;
-	if (rate == gpu_oc_from)
+	if (gpu_pms_latched && gpu_is_g3d(id))
 		return gpu_oc_requested;
 	return rate;
 }
@@ -393,6 +435,8 @@ static void gpu_arm(struct vclk *vclk, unsigned int volt, unsigned int from_khz,
 	gpu_oc_enabled = true;
 	gpu_status = status;
 	vclk->max_freq = gpu_oc_requested;
+	if (!g3d_pll_con0)
+		g3d_pll_con0 = ioremap(G3D_PLL_CON0_PHYS, 4);
 }
 
 static void init_gpu_s10(struct vclk *vclk, struct fvmap_header *header)
