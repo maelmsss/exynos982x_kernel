@@ -2,16 +2,15 @@
 /*
  * Opt-in Exynos 9820/9825 OPP unlock.
  *
- * S10 keeps YuROM's rule: reuse the unused 754 MHz PLL slot above a
- * 702 MHz top, and only select a firmware OPP that already exists.
- * Note10 has no unused slot. Its live top is 754 MHz, so 806 MHz is the
- * same M-divider change (116 -> 124) on that slot, at the same voltage.
+ * The stock GPU top stays in the DVFS table. 806 MHz is an extra row at
+ * the same voltage. Its PLL multiplier is written only while that clock
+ * is selected, then restored. Firmware rate rows are not renamed.
  * Either path aborts unless the firmware table matches. A missing 3016
  * row does not leave the M4 at the 2080 DTS cap: the highest fused rate
  * already in the table is used instead, and the -5% big margin stays.
  * A 2912/3016 row keeps its own voltage only while that clock is selected.
  * Every slower big clock keeps the -5% margin. GPU does the same: -3%
- * below the rewritten top, and the old top voltage at 806 MHz.
+ * below 806 MHz, and the stock top voltage at 806 MHz.
  * No rail value is invented.
  */
 
@@ -21,7 +20,6 @@
 #include <linux/slab.h>
 #include <linux/kobject.h>
 #include <linux/sysfs.h>
-#include <soc/samsung/ect_parser.h>
 
 #include "fvmap.h"
 #include "cmucal.h"
@@ -48,6 +46,10 @@ static bool gpu_oc_enabled;
 static unsigned int gpu_oc_from;
 static unsigned int gpu_oc_voltage;
 static const char *gpu_status = "disabled";
+static void __iomem *gpu_pms_slot;
+static u32 gpu_pms_stock;
+static u32 gpu_pms_oc;
+static bool gpu_pms_latched;
 
 struct cluster_oc_state {
 	unsigned int margin_id;
@@ -313,6 +315,55 @@ unsigned int exynos9820_gpu_oc_rate(unsigned int original_khz)
 	return original_khz;
 }
 
+static bool gpu_pms_write(u32 pms)
+{
+	if (!gpu_pms_slot)
+		return false;
+	if (readl(gpu_pms_slot) == pms)
+		return true;
+	writel(pms, gpu_pms_slot);
+	wmb();
+	if (readl(gpu_pms_slot) == pms)
+		return true;
+	writel(gpu_pms_stock, gpu_pms_slot);
+	wmb();
+	gpu_pms_latched = false;
+	return false;
+}
+
+static bool gpu_is_g3d(unsigned int id)
+{
+	int index = margin_vclk_id(MARGIN_G3D);
+
+	return index >= 0 && id == (ACPM_VCLK_TYPE | index);
+}
+
+unsigned long exynos9820_gpu_cal_rate(unsigned int id, unsigned long rate)
+{
+	if (!gpu_oc_enabled || !gpu_is_g3d(id))
+		return rate;
+	if (rate == gpu_oc_requested) {
+		if (!gpu_pms_write(gpu_pms_oc))
+			return rate;
+		gpu_pms_latched = true;
+		return gpu_oc_from;
+	}
+	if (gpu_pms_latched) {
+		gpu_pms_write(gpu_pms_stock);
+		gpu_pms_latched = false;
+	}
+	return rate;
+}
+
+unsigned long exynos9820_gpu_cal_get(unsigned int id, unsigned long rate)
+{
+	if (!gpu_pms_latched || !gpu_is_g3d(id))
+		return rate;
+	if (rate == gpu_oc_from)
+		return gpu_oc_requested;
+	return rate;
+}
+
 bool exynos9820_cpu_margin_for_freq(unsigned int margin_id, unsigned int khz,
 		int *percent)
 {
@@ -330,77 +381,18 @@ bool exynos9820_gpu_margin_for_freq(unsigned int khz, int *percent)
 	return true;
 }
 
-static void note_ect_gpu(unsigned int from_khz, unsigned int to_khz, u32 pms)
+static void gpu_arm(struct vclk *vclk, unsigned int volt, unsigned int from_khz,
+		u32 stock_pms, u32 oc_pms, void __iomem *slot, const char *status)
 {
-	struct ect_dvfs_domain *domain;
-	struct ect_pll *pll;
-	struct vclk *vclk;
-	int id, level;
-
-	id = margin_vclk_id(MARGIN_G3D);
-	if (id < 0)
-		return;
-	vclk = cmucal_get_node(ACPM_VCLK_TYPE | id);
-	if (!vclk)
-		return;
-	domain = ect_dvfs_get_domain(ect_get_block(BLOCK_DVFS), vclk->name);
-	if (domain) {
-		for (level = 0; level < domain->num_of_level; level++) {
-			if (domain->list_level[level].level == from_khz)
-				domain->list_level[level].level = to_khz;
-		}
-	}
-	pll = ect_pll_get_pll(ect_get_block(BLOCK_PLL), "PLL_G3D");
-	if (!pll)
-		return;
-	for (level = 0; level < pll->num_of_frequency; level++) {
-		if (pll->frequency_list[level].frequency == from_khz * 1000) {
-			pll->frequency_list[level].frequency = to_khz * 1000;
-			pll->frequency_list[level].m = (pms >> 16) & 0x3ff;
-			pll->frequency_list[level].p = (pms >> 8) & 0x3f;
-			pll->frequency_list[level].s = pms & 7;
-		}
-	}
-}
-
-static bool gpu_write_top(struct vclk *vclk, struct fvmap_header *header,
-		unsigned int from_khz, u32 old_pms, u32 new_pms, unsigned int pms_index)
-{
-	struct rate_volt_header *rates = oc_fvmap + header->o_ratevolt;
-	unsigned int pll_offset;
-	u32 pll_count;
-
-	pll_offset = readw(oc_sram + header->o_members);
-	pll_count = readw(oc_sram + pll_offset + offsetof(struct pll_header, level));
-	if (pms_index >= pll_count)
-		return false;
-	if (new_pms != old_pms)
-		writel(new_pms, oc_sram + pll_offset +
-		       offsetof(struct pll_header, pms) + pms_index * sizeof(u32));
-	writel(gpu_oc_requested, oc_sram + header->o_ratevolt);
-	wmb();
-	if ((new_pms != old_pms &&
-	     readl(oc_sram + pll_offset + offsetof(struct pll_header, pms) +
-		   pms_index * sizeof(u32)) != new_pms) ||
-	    readl(oc_sram + header->o_ratevolt) != gpu_oc_requested) {
-		if (new_pms != old_pms)
-			writel(old_pms, oc_sram + pll_offset +
-			       offsetof(struct pll_header, pms) +
-			       pms_index * sizeof(u32));
-		writel(from_khz, oc_sram + header->o_ratevolt);
-		wmb();
-		gpu_status = "blocked-readback";
-		return false;
-	}
-	rates->table[0].rate = gpu_oc_requested;
-	if (vclk->lut && vclk->lut[0].rate == from_khz)
-		vclk->lut[0].rate = gpu_oc_requested;
-	vclk->max_freq = gpu_oc_requested;
-	gpu_oc_voltage = rates->table[0].volt;
+	gpu_pms_slot = slot;
+	gpu_pms_stock = stock_pms;
+	gpu_pms_oc = oc_pms;
+	gpu_pms_latched = false;
 	gpu_oc_from = from_khz;
+	gpu_oc_voltage = volt;
 	gpu_oc_enabled = true;
-	note_ect_gpu(from_khz, gpu_oc_requested, new_pms);
-	return true;
+	gpu_status = status;
+	vclk->max_freq = gpu_oc_requested;
 }
 
 static void init_gpu_s10(struct vclk *vclk, struct fvmap_header *header)
@@ -445,38 +437,12 @@ static void init_gpu_s10(struct vclk *vclk, struct fvmap_header *header)
 	}
 	target_pms = gpu_oc_requested == 754000 ?
 		EXYNOS9820_GPU_PMS_754 : EXYNOS9820_GPU_PMS_806;
-	/* Point level 0 at the unused slot 0, then retarget that slot. */
-	if (target_pms != candidate)
-		writel(target_pms, oc_sram + pll_offset +
-		       offsetof(struct pll_header, pms));
-	writel(gpu_oc_requested, oc_sram + header->o_ratevolt);
-	writeb(0, oc_sram + header->o_tables);
-	wmb();
-	if (readl(oc_sram + pll_offset + offsetof(struct pll_header, pms)) != target_pms ||
-	    readl(oc_sram + header->o_ratevolt) != gpu_oc_requested ||
-	    readb(oc_sram + header->o_tables) != 0) {
-		writel(candidate, oc_sram + pll_offset + offsetof(struct pll_header, pms));
-		writel(702000, oc_sram + header->o_ratevolt);
-		writeb(index, oc_sram + header->o_tables);
-		wmb();
-		gpu_status = "blocked-readback";
-		return;
-	}
-	rates->table[0].rate = gpu_oc_requested;
-	*((u8 *)oc_fvmap + header->o_tables) = 0;
-	if (vclk->lut) {
-		vclk->lut[0].rate = gpu_oc_requested;
-		if (vclk->lut[0].params)
-			vclk->lut[0].params[0] = 0;
-	}
-	vclk->max_freq = gpu_oc_requested;
-	gpu_oc_voltage = rates->table[0].volt;
-	gpu_oc_from = 702000;
-	gpu_oc_enabled = true;
-	gpu_status = "s10-same-voltage";
-	note_ect_gpu(702000, gpu_oc_requested, target_pms);
-	pr_info("gpu-oc: s10 %u -> %u kHz at %u uV\n",
-		702000, gpu_oc_requested, gpu_oc_voltage);
+	/* Keep the 702 kHz row. Retarget its PLL only while the extra clock runs. */
+	gpu_arm(vclk, rates->table[0].volt, 702000, top, target_pms,
+		oc_sram + pll_offset + offsetof(struct pll_header, pms) +
+		sizeof(u32), "s10-extra-row");
+	pr_info("gpu-oc: s10 keeps 702000, adds %u kHz at %u uV\n",
+		gpu_oc_requested, gpu_oc_voltage);
 }
 
 static void init_gpu_n10(struct vclk *vclk, struct fvmap_header *header)
@@ -519,12 +485,12 @@ static void init_gpu_n10(struct vclk *vclk, struct fvmap_header *header)
 		pr_info("gpu-oc: n10 top pms=%#x index=%u\n", top_pms, top_index);
 		return;
 	}
-	if (!gpu_write_top(vclk, header, 754000, top_pms,
-			   EXYNOS9820_GPU_PMS_806, top_index))
-		return;
-	gpu_status = "n10-same-voltage";
-	pr_info("gpu-oc: n10 %u -> %u kHz at %u uV\n",
-		754000, gpu_oc_requested, gpu_oc_voltage);
+	gpu_arm(vclk, rates->table[0].volt, 754000, top_pms,
+		EXYNOS9820_GPU_PMS_806,
+		oc_sram + pll_offset + offsetof(struct pll_header, pms) +
+		top_index * sizeof(u32), "n10-extra-row");
+	pr_info("gpu-oc: n10 keeps 754000, adds %u kHz at %u uV\n",
+		gpu_oc_requested, gpu_oc_voltage);
 }
 
 static void init_gpu_oc(void)
@@ -554,7 +520,7 @@ static ssize_t oc_status_show(struct kobject *kobj, struct kobj_attribute *attr,
 		"cpu %s requested=%u enabled=%u keep_uv=%u stock=%u target=%u uv=%u\n"
 		"little %s enabled=%u stock=%u target=%u\n"
 		"mid %s enabled=%u stock=%u target=%u\n"
-		"gpu %s requested=%u enabled=%u from=%u to=%u uv=%u\n",
+		"gpu %s requested=%u enabled=%u from=%u to=%u uv=%u latched=%u\n",
 		cpucl2_status, cpucl2_oc_requested, cpucl2_oc_enabled,
 		cpucl2_keep_uv, cpucl2_stock_khz, cpucl2_oc_target, cpucl2_target_uv,
 		cluster_oc[0].status, cluster_oc[0].enabled,
@@ -562,7 +528,7 @@ static ssize_t oc_status_show(struct kobject *kobj, struct kobj_attribute *attr,
 		cluster_oc[1].status, cluster_oc[1].enabled,
 		cluster_oc[1].stock_khz, cluster_oc[1].target_khz,
 		gpu_status, gpu_oc_requested, gpu_oc_enabled,
-		gpu_oc_from, gpu_oc_requested, gpu_oc_voltage);
+		gpu_oc_from, gpu_oc_requested, gpu_oc_voltage, gpu_pms_latched);
 }
 static struct kobj_attribute oc_status_attr = __ATTR(status, 0444, oc_status_show, NULL);
 

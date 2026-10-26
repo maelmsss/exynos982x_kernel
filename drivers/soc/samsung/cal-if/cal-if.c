@@ -60,6 +60,7 @@ int cal_dfs_set_rate(unsigned int id, unsigned long rate)
 	int ret;
 
 	if (IS_ACPM_VCLK(id)) {
+		rate = exynos9820_gpu_cal_rate(id, rate);
 		if (cal_check_hiu_dvfs_id && cal_check_hiu_dvfs_id(id))
 			ret = exynos_hiu_set_freq(id, rate);
 		else
@@ -105,14 +106,10 @@ unsigned long cal_dfs_cached_get_rate(unsigned int id)
 
 unsigned long cal_dfs_get_rate(unsigned int id)
 {
-	int ret;
-
 	if (cal_check_hiu_dvfs_id && cal_check_hiu_dvfs_id(id))
 		return exynos_hiu_get_freq(id);
 
-	ret = vclk_recalc_rate(id);
-
-	return ret;
+	return exynos9820_gpu_cal_get(id, vclk_recalc_rate(id));
 }
 
 int cal_dfs_get_rate_table(unsigned int id, unsigned long *table)

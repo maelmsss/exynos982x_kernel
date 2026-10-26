@@ -18,6 +18,8 @@ bool exynos9820_oc_big_keep_uv(void);
 bool exynos9820_oc_gpu_enabled(void);
 void exynos9820_oc_init(void __iomem *fvmap, void __iomem *sram);
 unsigned int exynos9820_gpu_oc_rate(unsigned int original_khz);
+unsigned long exynos9820_gpu_cal_rate(unsigned int id, unsigned long rate);
+unsigned long exynos9820_gpu_cal_get(unsigned int id, unsigned long rate);
 int exynos9820_cluster_oc_override(unsigned int id, unsigned int dt_max);
 int exynos9820_m4_oc_override(unsigned int id, unsigned int dt_max);
 unsigned int exynos9820_cluster_oc_thermal_limit(const char *zone,

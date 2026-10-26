@@ -110,6 +110,8 @@ extern int cal_if_init(void *);
 extern void cal_fimc_is_mclk_control(unsigned int enable, unsigned int num);
 
 unsigned int exynos9820_gpu_oc_rate(unsigned int original_khz);
+unsigned long exynos9820_gpu_cal_rate(unsigned int id, unsigned long rate);
+unsigned long exynos9820_gpu_cal_get(unsigned int id, unsigned long rate);
 int exynos9820_cluster_oc_override(unsigned int id, unsigned int dt_max);
 int exynos9820_m4_oc_override(unsigned int id, unsigned int dt_max);
 unsigned int exynos9820_cluster_oc_thermal_limit(const char *zone,
