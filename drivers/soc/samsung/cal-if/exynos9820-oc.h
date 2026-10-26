@@ -18,6 +18,8 @@ bool exynos9820_oc_big_keep_uv(void);
 bool exynos9820_oc_gpu_enabled(void);
 void exynos9820_oc_init(void __iomem *fvmap, void __iomem *sram);
 unsigned int exynos9820_gpu_oc_rate(unsigned int original_khz);
+unsigned int exynos9820_gpu_oc_steps(unsigned int top_khz, unsigned int *steps,
+		unsigned int max);
 unsigned long exynos9820_gpu_cal_rate(unsigned int id, unsigned long rate);
 unsigned long exynos9820_gpu_cal_done(unsigned int id, unsigned long programmed);
 void exynos9820_gpu_cal_abort(void);
