@@ -25,8 +25,6 @@
 #include <linux/debug-snapshot.h>
 
 #include <soc/samsung/exynos-cpuhp.h>
-#include <soc/samsung/cal-if.h>
-
 #include "../../../kernel/sched/sched.h"
 #include "../../cpufreq/exynos-acme.h"
 #include "../../../kernel/sched/ems/ems.h"
@@ -140,15 +138,6 @@ static void update_ocp_stats(struct ocp_stats *stats)
 	stats->last_time = cur_time;
 }
 
-static unsigned int ocp_apply_floor(unsigned int freq)
-{
-	unsigned int floor = exynos9820_oc_cpu_floor();
-
-	if (floor && freq < floor)
-		return floor;
-	return freq;
-}
-
 static unsigned int get_ocp_target_max_limit(unsigned int down_step)
 {
 	struct ocp_stats *stats = data->stats;
@@ -184,12 +173,12 @@ static void set_ocp_max_limit(unsigned int down_step)
 	if (down_step) {
 		target_max = get_ocp_target_max_limit(down_step);
 		if (target_max) {
-			data->clipped_freq = ocp_apply_floor(target_max);
+			data->clipped_freq = target_max;
 			pr_debug("OCP max limit is set to %u kHz\n", data->clipped_freq);
 		} else
 			return;
 	} else {
-		data->clipped_freq = ocp_apply_floor(data->max_freq);
+		data->clipped_freq = data->max_freq;
 		pr_debug("OCP max limit is released\n");
 	}
 
@@ -288,7 +277,7 @@ static void control_ocp_operation(bool enable)
 		CONTROL_OCP_WARN(1);
 
 		/* Release OCP max limit */
-		data->clipped_freq = ocp_apply_floor(data->max_freq);
+		data->clipped_freq = data->max_freq;
 		cpufreq_update_policy(data->cpu);
 
 		/* Re-init OCP stats */
@@ -302,7 +291,7 @@ static void control_ocp_operation(bool enable)
 		update_ocp_stats(data->stats);
 
 		/* Press OCP max limit to max frequency without OCP */
-		data->clipped_freq = ocp_apply_floor(data->max_freq_wo_ocp);
+		data->clipped_freq = data->max_freq_wo_ocp;
 		cpufreq_update_policy(data->cpu);
 
 		CONTROL_OCP_WARN(0);
@@ -450,8 +439,6 @@ static int exynos_ocp_policy_callback(struct notifier_block *nb,
 				unsigned long event, void *info)
 {
 	struct cpufreq_policy *policy = info;
-	unsigned int limit, floor;
-
 	if (!data || !data->updated)
 		return NOTIFY_DONE;
 
@@ -461,12 +448,8 @@ static int exynos_ocp_policy_callback(struct notifier_block *nb,
 	if (event != CPUFREQ_ADJUST)
 		return NOTIFY_DONE;
 
-	floor = exynos9820_oc_cpu_floor();
-	limit = ocp_apply_floor(data->clipped_freq);
-	if (floor && policy->max < floor)
-		policy->max = floor;
-	if (policy->max > limit)
-		cpufreq_verify_within_limits(policy, 0, limit);
+	if (policy->max > data->clipped_freq)
+		cpufreq_verify_within_limits(policy, 0, data->clipped_freq);
 
 	return NOTIFY_OK;
 }
@@ -535,7 +518,7 @@ static int exynos_ocp_update_data(struct cpufreq_policy *policy)
 	data->flag = false;
 	data->min_freq = policy->user_policy.min;
 	data->max_freq = policy->user_policy.max;
-	data->clipped_freq = ocp_apply_floor(data->max_freq);
+	data->clipped_freq = data->max_freq;
 	ocp_stats_create_table(policy);
 	control_ocp_interrupt(1);
 
