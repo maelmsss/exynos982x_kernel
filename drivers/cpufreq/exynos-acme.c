@@ -352,12 +352,31 @@ static int exynos_cpufreq_driver_init(struct cpufreq_policy *policy)
 	return 0;
 }
 
+static bool big_ceiling_ready;
+
 static int exynos_cpufreq_verify(struct cpufreq_policy *policy)
 {
 	struct exynos_cpufreq_domain *domain = find_domain(policy->cpu);
+	struct cpufreq_frequency_table *pos;
+	unsigned int floor;
 
 	if (!domain)
 		return -EINVAL;
+
+	/*
+	 * False until set_boot_qos() has capped the boot clock.
+	 * Raising the ceiling here does not step the clock: the 2080
+	 * PM QoS pin is already installed, and schedutil moves later.
+	 */
+	floor = big_ceiling_ready ? exynos9820_oc_cpu_floor() : 0;
+	if (floor && policy->max < floor) {
+		cpufreq_for_each_valid_entry(pos, domain->freq_table) {
+			if (pos->frequency == floor) {
+				policy->max = floor;
+				break;
+			}
+		}
+	}
 
 	return cpufreq_frequency_table_verify(policy, domain->freq_table);
 }
@@ -1553,6 +1572,14 @@ static int __init exynos_cpufreq_init(void)
 
 		set_boot_qos(domain);
 	}
+
+	/*
+	 * The boot pin is in. Later policy updates may keep 3016 as the
+	 * ceiling. This call only re-evaluates the limit.
+	 */
+	big_ceiling_ready = true;
+	list_for_each_entry(domain, &domains, list)
+		cpufreq_update_policy(cpumask_first(&domain->cpus));
 
 	set_energy_table_status(true);
 
