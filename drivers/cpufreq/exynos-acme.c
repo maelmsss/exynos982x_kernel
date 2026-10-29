@@ -355,26 +355,9 @@ static int exynos_cpufreq_driver_init(struct cpufreq_policy *policy)
 static int exynos_cpufreq_verify(struct cpufreq_policy *policy)
 {
 	struct exynos_cpufreq_domain *domain = find_domain(policy->cpu);
-	struct cpufreq_frequency_table *pos;
-	unsigned int floor;
 
 	if (!domain)
 		return -EINVAL;
-
-	/*
-	 * Called again after every CPUFREQ_ADJUST notifier. The big
-	 * cluster's 3016 row is in this table only, so little and mid
-	 * are left alone. A later notifier cannot put the ceiling back.
-	 */
-	floor = exynos9820_oc_cpu_floor();
-	if (floor && policy->max < floor) {
-		cpufreq_for_each_valid_entry(pos, domain->freq_table) {
-			if (pos->frequency == floor) {
-				policy->max = floor;
-				break;
-			}
-		}
-	}
 
 	return cpufreq_frequency_table_verify(policy, domain->freq_table);
 }
