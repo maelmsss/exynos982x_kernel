@@ -315,20 +315,6 @@ unsigned int exynos9820_gpu_oc_rate(unsigned int original_khz)
 	return original_khz;
 }
 
-unsigned int exynos9820_gpu_oc_steps(unsigned int top_khz, unsigned int *steps,
-		unsigned int max)
-{
-	if (!gpu_oc_enabled || !steps || !max || top_khz != gpu_oc_from)
-		return 0;
-	if (gpu_oc_from == 702000 && gpu_oc_requested == 806000 && max >= 2) {
-		steps[0] = 806000;
-		steps[1] = 754000;
-		return 2;
-	}
-	steps[0] = gpu_oc_requested;
-	return gpu_oc_requested != top_khz;
-}
-
 static bool gpu_pms_write(u32 pms)
 {
 	if (!gpu_pms_slot)
@@ -358,22 +344,6 @@ static bool gpu_is_g3d(unsigned int id)
 
 static void __iomem *g3d_pll_con0;
 static bool gpu_boost_pending;
-static u32 gpu_pending_pms;
-static unsigned int gpu_latched_khz;
-
-static bool gpu_boost_pms(unsigned long rate, u32 *pms)
-{
-	if (rate == gpu_oc_requested) {
-		*pms = gpu_pms_oc;
-		return true;
-	}
-	/* S10 has no 754 firmware row. N10 does, so 754 stays a normal rate there. */
-	if (gpu_oc_from == 702000 && rate == 754000) {
-		*pms = EXYNOS9820_GPU_PMS_754;
-		return true;
-	}
-	return false;
-}
 
 static void gpu_pll_apply(u32 pms)
 {
@@ -399,9 +369,8 @@ unsigned long exynos9820_gpu_cal_rate(unsigned int id, unsigned long rate)
 {
 	if (!gpu_oc_enabled || !gpu_is_g3d(id))
 		return rate;
-	if (gpu_boost_pms(rate, &gpu_pending_pms)) {
-		gpu_pms_write(gpu_pending_pms);
-		gpu_latched_khz = rate;
+	if (rate == gpu_oc_requested) {
+		gpu_pms_write(gpu_pms_oc);
 		gpu_boost_pending = true;
 		return gpu_oc_from;
 	}
@@ -420,9 +389,9 @@ unsigned long exynos9820_gpu_cal_done(unsigned int id, unsigned long programmed)
 		return programmed;
 	}
 	gpu_boost_pending = false;
-	gpu_pll_apply(gpu_pending_pms);
+	gpu_pll_apply(gpu_pms_oc);
 	gpu_pms_latched = true;
-	return gpu_latched_khz;
+	return gpu_oc_requested;
 }
 
 void exynos9820_gpu_cal_abort(void)
@@ -433,7 +402,7 @@ void exynos9820_gpu_cal_abort(void)
 unsigned long exynos9820_gpu_cal_get(unsigned int id, unsigned long rate)
 {
 	if (gpu_pms_latched && gpu_is_g3d(id))
-		return gpu_latched_khz;
+		return gpu_oc_requested;
 	return rate;
 }
 
@@ -450,7 +419,7 @@ bool exynos9820_gpu_margin_for_freq(unsigned int khz, int *percent)
 {
 	if (!percent || !gpu_oc_enabled)
 		return false;
-	*percent = khz > gpu_oc_from ? 0 : -3;
+	*percent = khz >= gpu_oc_requested ? 0 : -3;
 	return true;
 }
 

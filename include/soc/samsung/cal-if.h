@@ -110,8 +110,6 @@ extern int cal_if_init(void *);
 extern void cal_fimc_is_mclk_control(unsigned int enable, unsigned int num);
 
 unsigned int exynos9820_gpu_oc_rate(unsigned int original_khz);
-unsigned int exynos9820_gpu_oc_steps(unsigned int top_khz, unsigned int *steps,
-		unsigned int max);
 unsigned long exynos9820_gpu_cal_rate(unsigned int id, unsigned long rate);
 unsigned long exynos9820_gpu_cal_done(unsigned int id, unsigned long programmed);
 void exynos9820_gpu_cal_abort(void);

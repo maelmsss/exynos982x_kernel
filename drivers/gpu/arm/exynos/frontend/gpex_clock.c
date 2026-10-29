@@ -120,21 +120,19 @@ static int gpex_clock_update_config_data_from_dt(void)
 
 	kfree(fv_array);
 
-	if (clk_info.table && clk_info.table_size > 1) {
+	if (clk_info.table && clk_info.table_size > 1 &&
+	    !clk_info.table[0].clock && clk_info.table[1].clock) {
 		dt_clock_item *dt_clock_table = gpexbe_devicetree_get_clock_table();
-		unsigned int base = 0;
+		unsigned int extra = exynos9820_gpu_oc_rate(clk_info.table[1].clock);
 
-		while (base < clk_info.table_size && !clk_info.table[base].clock)
-			base++;
-		if (dt_clock_table && base > 0 && base < clk_info.table_size) {
-			for (i = 0; i < base; i++) {
-				clk_info.table[i].clock = dt_clock_table[i].clock;
-				clk_info.table[i].voltage = clk_info.table[base].voltage;
-			}
-			if (clk_info.gpu_max_clock < dt_clock_table[0].clock)
-				clk_info.gpu_max_clock = dt_clock_table[0].clock;
-			if (clk_info.gpu_max_clock_limit < dt_clock_table[0].clock)
-				clk_info.gpu_max_clock_limit = dt_clock_table[0].clock;
+		if (dt_clock_table && extra != clk_info.table[1].clock &&
+		    dt_clock_table[0].clock == extra) {
+			clk_info.table[0].clock = extra;
+			clk_info.table[0].voltage = clk_info.table[1].voltage;
+			if (clk_info.gpu_max_clock < extra)
+				clk_info.gpu_max_clock = extra;
+			if (clk_info.gpu_max_clock_limit < extra)
+				clk_info.gpu_max_clock_limit = extra;
 		}
 	}
 
