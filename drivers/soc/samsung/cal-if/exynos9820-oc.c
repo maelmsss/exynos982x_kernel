@@ -308,13 +308,6 @@ int exynos9820_m4_oc_override(unsigned int id, unsigned int dt_max)
 	return index >= 0 && id == (ACPM_VCLK_TYPE | index);
 }
 
-unsigned int exynos9820_oc_cpu_floor(void)
-{
-	if (!cpucl2_oc_enabled || cpucl2_oc_target <= EXYNOS9820_M4_STOCK_KHZ)
-		return 0;
-	return cpucl2_oc_target;
-}
-
 unsigned int exynos9820_gpu_oc_rate(unsigned int original_khz)
 {
 	if (gpu_oc_enabled && original_khz == gpu_oc_from)

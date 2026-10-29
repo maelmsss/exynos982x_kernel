@@ -26,7 +26,6 @@ void exynos9820_gpu_cal_abort(void);
 unsigned long exynos9820_gpu_cal_get(unsigned int id, unsigned long rate);
 int exynos9820_cluster_oc_override(unsigned int id, unsigned int dt_max);
 int exynos9820_m4_oc_override(unsigned int id, unsigned int dt_max);
-unsigned int exynos9820_oc_cpu_floor(void);
 unsigned int exynos9820_cluster_oc_thermal_limit(const char *zone,
 		unsigned int range, int temperature, unsigned int limit_khz);
 bool exynos9820_cpu_margin_for_freq(unsigned int margin_id, unsigned int khz,
