@@ -399,71 +399,6 @@ static const struct attribute_group percent_margin_group = {
 	.attrs = percent_margin_attrs,
 };
 
-static void exynos9820_uv_set(int margin_id, int percent)
-{
-	int id;
-
-	if (margin_id < 0 || margin_id >= MAX_MARGIN_ID)
-		return;
-	if (percent_margin_table[margin_id] == percent)
-		return;
-	id = get_vclk_id_from_margin_id(margin_id);
-	if (id < 0)
-		return;
-	percent_margin_table[margin_id] = percent;
-	cal_dfs_set_volt_margin(id | ACPM_VCLK_TYPE, percent);
-}
-
-static unsigned int margin_of_cal(unsigned int cal_id)
-{
-	struct vclk *vclk = cmucal_get_node(cal_id);
-
-	return vclk ? vclk->margin_id : MAX_MARGIN_ID;
-}
-
-void exynos9820_uv_prepare_cpu(unsigned int cal_id, unsigned int old_khz,
-		unsigned int new_khz)
-{
-	unsigned int margin_id = margin_of_cal(cal_id);
-	int old_percent, new_percent;
-
-	if (!exynos9820_cpu_margin_for_freq(margin_id, old_khz, &old_percent))
-		return;
-	if (!exynos9820_cpu_margin_for_freq(margin_id, new_khz, &new_percent))
-		return;
-	if (new_percent > old_percent)
-		exynos9820_uv_set(margin_id, new_percent);
-}
-
-void exynos9820_uv_finish_cpu(unsigned int cal_id, unsigned int khz)
-{
-	unsigned int margin_id = margin_of_cal(cal_id);
-	int percent;
-
-	if (exynos9820_cpu_margin_for_freq(margin_id, khz, &percent))
-		exynos9820_uv_set(margin_id, percent);
-}
-
-void exynos9820_uv_prepare_gpu(unsigned int old_khz, unsigned int new_khz)
-{
-	int old_percent, new_percent;
-
-	if (!exynos9820_gpu_margin_for_freq(old_khz, &old_percent))
-		return;
-	if (!exynos9820_gpu_margin_for_freq(new_khz, &new_percent))
-		return;
-	if (new_percent > old_percent)
-		exynos9820_uv_set(MARGIN_G3D, new_percent);
-}
-
-void exynos9820_uv_finish_gpu(unsigned int khz)
-{
-	int percent;
-
-	if (exynos9820_gpu_margin_for_freq(khz, &percent))
-		exynos9820_uv_set(MARGIN_G3D, percent);
-}
-
 static void fvmap_copy_from_sram(void __iomem *map_base, void __iomem *sram_base)
 {
 	volatile struct fvmap_header *fvmap_header, *header;
@@ -597,12 +532,14 @@ int fvmap_init(void __iomem *sram_base)
 	} else if (exynos9820_oc_big_enabled()) {
 		percent_margin_table[MARGIN_BIG] = 0;
 	}
-	if (exynos9820_oc_defer_g3d() && init_margin_table[MARGIN_G3D]) {
+	if (exynos9820_oc_defer_g3d() && !exynos9820_oc_gpu_enabled()) {
 		int id = get_vclk_id_from_margin_id(MARGIN_G3D);
 
-		if (id >= 0)
+		if (id >= 0 && init_margin_table[MARGIN_G3D])
 			cal_dfs_set_volt_margin(id | ACPM_VCLK_TYPE,
 						init_margin_table[MARGIN_G3D]);
+	} else if (exynos9820_oc_gpu_enabled()) {
+		percent_margin_table[MARGIN_G3D] = 0;
 	}
 
 	/* percent margin for each doamin at runtime */
