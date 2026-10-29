@@ -19,7 +19,6 @@
  */
 
 #include <linux/slab.h>
-#include <soc/samsung/cal-if.h>
 
 #include <gpex_clock.h>
 #include <gpex_qos.h>
@@ -119,22 +118,6 @@ static int gpex_clock_update_config_data_from_dt(void)
 	}
 
 	kfree(fv_array);
-
-	if (clk_info.table && clk_info.table_size > 1 &&
-	    !clk_info.table[0].clock && clk_info.table[1].clock) {
-		dt_clock_item *dt_clock_table = gpexbe_devicetree_get_clock_table();
-		unsigned int extra = exynos9820_gpu_oc_rate(clk_info.table[1].clock);
-
-		if (dt_clock_table && extra != clk_info.table[1].clock &&
-		    dt_clock_table[0].clock == extra) {
-			clk_info.table[0].clock = extra;
-			clk_info.table[0].voltage = clk_info.table[1].voltage;
-			if (clk_info.gpu_max_clock < extra)
-				clk_info.gpu_max_clock = extra;
-			if (clk_info.gpu_max_clock_limit < extra)
-				clk_info.gpu_max_clock_limit = extra;
-		}
-	}
 
 	return 0;
 }

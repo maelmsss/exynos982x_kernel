@@ -22,7 +22,6 @@
 #include <linux/of.h>
 #include <linux/sysfs.h>
 #include <linux/slab.h>
-#include <linux/string.h>
 
 #include <gpex_utils.h>
 #include <gpexbe_devicetree.h>
@@ -316,35 +315,10 @@ int gpexbe_devicetree_init(struct device *dev)
 	build_clk_table();
 	build_cl_pmqos_table();
 	if (clock_table && dt_info.gpu_dvfs_table_size.row > 0) {
-		unsigned int rows = dt_info.gpu_dvfs_table_size.row;
-		unsigned int extra = exynos9820_gpu_oc_rate(clock_table[0].clock);
-		void *grown;
-
-		if (extra && extra != clock_table[0].clock) {
-			grown = krealloc(clock_table,
-					 (rows + 1) * sizeof(*clock_table), GFP_KERNEL);
-			if (grown) {
-				clock_table = grown;
-				memmove(&clock_table[1], &clock_table[0],
-					rows * sizeof(*clock_table));
-				clock_table[0].clock = extra;
-				dt_info.gpu_dvfs_table_size.row = rows + 1;
-				dt_info.gpu_max_clock = extra;
-			}
-			if (clqos_table && grown &&
-			    dt_info.gpu_cl_pmqos_table_size.row == rows) {
-				grown = krealloc(clqos_table,
-						 (rows + 1) * sizeof(*clqos_table),
-						 GFP_KERNEL);
-				if (grown) {
-					clqos_table = grown;
-					memmove(&clqos_table[1], &clqos_table[0],
-						rows * sizeof(*clqos_table));
-					clqos_table[0].clock = extra;
-					dt_info.gpu_cl_pmqos_table_size.row = rows + 1;
-				}
-			}
-		}
+		dt_info.gpu_max_clock = exynos9820_gpu_oc_rate(dt_info.gpu_max_clock);
+		clock_table[0].clock = exynos9820_gpu_oc_rate(clock_table[0].clock);
+		if (clqos_table && dt_info.gpu_cl_pmqos_table_size.row > 0)
+			clqos_table[0].clock = exynos9820_gpu_oc_rate(clqos_table[0].clock);
 	}
 	read_interactive_info_array();
 
