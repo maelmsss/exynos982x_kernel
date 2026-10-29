@@ -21,7 +21,6 @@
 #include <linux/cpu_cooling.h>
 #include <linux/suspend.h>
 #include <linux/ems.h>
-#include <linux/workqueue.h>
 
 #include <soc/samsung/cal-if.h>
 #include <soc/samsung/ect_parser.h>
@@ -353,9 +352,6 @@ static int exynos_cpufreq_driver_init(struct cpufreq_policy *policy)
 	return 0;
 }
 
-static bool big_ceiling_ready;
-static struct delayed_work big_ceiling_work;
-
 static int exynos_cpufreq_verify(struct cpufreq_policy *policy)
 {
 	struct exynos_cpufreq_domain *domain = find_domain(policy->cpu);
@@ -366,11 +362,11 @@ static int exynos_cpufreq_verify(struct cpufreq_policy *policy)
 		return -EINVAL;
 
 	/*
-	 * Armed only after the boot pin expires. This raises the ceiling
-	 * only. The governor moves the clock when load asks for it.
-	 * The 3016 row exists on the big table alone.
+	 * Called again after every CPUFREQ_ADJUST notifier. The big
+	 * cluster's 3016 row is in this table only, so little and mid
+	 * are left alone. A later notifier cannot put the ceiling back.
 	 */
-	floor = big_ceiling_ready ? exynos9820_oc_cpu_floor() : 0;
+	floor = exynos9820_oc_cpu_floor();
 	if (floor && policy->max < floor) {
 		cpufreq_for_each_valid_entry(pos, domain->freq_table) {
 			if (pos->frequency == floor) {
@@ -381,37 +377,6 @@ static int exynos_cpufreq_verify(struct cpufreq_policy *policy)
 	}
 
 	return cpufreq_frequency_table_verify(policy, domain->freq_table);
-}
-
-static void exynos_big_ceiling_arm(struct work_struct *unused)
-{
-	struct cpufreq_policy *policy;
-	unsigned int floor = exynos9820_oc_cpu_floor();
-
-	if (!floor)
-		return;
-
-	policy = cpufreq_cpu_get(6);
-	if (!policy) {
-		schedule_delayed_work(&big_ceiling_work, 5 * HZ);
-		return;
-	}
-
-	down_write(&policy->rwsem);
-	big_ceiling_ready = true;
-	if (policy->max < floor)
-		policy->max = floor;
-	if (policy->user_policy.max < floor)
-		policy->user_policy.max = floor;
-	up_write(&policy->rwsem);
-	cpufreq_cpu_put(policy);
-}
-
-static int __init exynos_big_ceiling_init(void)
-{
-	INIT_DELAYED_WORK(&big_ceiling_work, exynos_big_ceiling_arm);
-	schedule_delayed_work(&big_ceiling_work, 45 * HZ);
-	return 0;
 }
 
 static int __exynos_cpufreq_target(struct cpufreq_policy *policy,
@@ -1613,4 +1578,3 @@ static int __init exynos_cpufreq_init(void)
 	return ret;
 }
 device_initcall(exynos_cpufreq_init);
-late_initcall(exynos_big_ceiling_init);
