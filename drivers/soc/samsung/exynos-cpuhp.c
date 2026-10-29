@@ -378,7 +378,7 @@ static int cpuhp_control(bool enable)
 	int ret = 0;
 
 	if (enable) {
-		cpuhp_enable(true);
+		cpuhp_enable(false);
 		cpuhp_do(true);
 	} else {
 		mutex_lock(&cpuhp.lock);

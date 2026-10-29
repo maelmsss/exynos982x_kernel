@@ -71,6 +71,7 @@ static int __init exynos_handler_setup(struct device_node *np)
 		} else {
 			pr_info("Success to request irq%d for %s ecc handler\n",
 					ecc_handler[i].irq, ecc_handler[i].name);
+					
 		}
 	}
 

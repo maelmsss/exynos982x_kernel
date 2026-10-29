@@ -130,3 +130,45 @@ int prefer_idle_cpu(struct task_struct *p)
 
 	return select_idle_cpu(p);
 }
+
+#ifdef CONFIG_SCHED_BORE
+extern uint sched_bore;
+
+#define BORE_LAT_SCORE 4
+
+static bool bore_in_ux_cpuset(struct task_struct *p)
+{
+	struct cgroup_subsys_state *css;
+	char name[32];
+
+	if (schedtune_prefer_idle(p) > 0 ||
+	    schedtune_prefer_perf(p) > 0)
+		return true;
+
+#ifdef CONFIG_CPUSETS
+	css = task_css(p, cpuset_cgrp_id);
+	if (!css || !css->cgroup)
+		return false;
+	if (cgroup_name(css->cgroup, name, sizeof(name)) <= 0)
+		return false;
+	return !strcmp(name, "top-app") ||
+	       !strcmp(name, "foreground") ||
+	       !strcmp(name, "foreground_window");
+#else
+	return false;
+#endif
+}
+
+int bore_wakeup_cpu(struct task_struct *p)
+{
+	if (!sched_bore)
+		return -1;
+	if (p->sched_class != &fair_sched_class)
+		return -1;
+	if (p->se.burst_score > BORE_LAT_SCORE)
+		return -1;
+	if (!bore_in_ux_cpuset(p))
+		return -1;
+	return select_perf_cpu(p);
+}
+#endif

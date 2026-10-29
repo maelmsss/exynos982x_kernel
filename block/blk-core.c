@@ -796,7 +796,10 @@ void __blk_drain_queue(struct request_queue *q, bool drain_all)
 	int i;
 
 	lockdep_assert_held(q->queue_lock);
-	WARN_ON_ONCE(q->mq_ops);
+
+	/* Never run the legacy drain path on a blk-mq queue (UFS). */
+	if (q->mq_ops)
+		return;
 
 	while (true) {
 		bool drain = false;
