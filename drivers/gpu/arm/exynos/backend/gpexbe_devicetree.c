@@ -328,13 +328,6 @@ int gpexbe_devicetree_init(struct device *dev)
 				memmove(&clock_table[1], &clock_table[0],
 					rows * sizeof(*clock_table));
 				clock_table[0].clock = extra;
-				/* Stock top used up=100 because nothing sat above it.
-				 * 98 is the same gate the old second row used to enter
-				 * that top, so 806 is now the step load actually reaches.
-				 * 90 lets the dynamic governor clear 806 * threshold.
-				 */
-				clock_table[0].max_threshold = 90;
-				clock_table[1].max_threshold = 98;
 				dt_info.gpu_dvfs_table_size.row = rows + 1;
 				dt_info.gpu_max_clock = extra;
 			}

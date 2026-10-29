@@ -66,12 +66,9 @@ int cal_dfs_set_rate(unsigned int id, unsigned long rate)
 		else
 			ret = exynos_acpm_set_rate(GET_IDX(id), rate);
 		if (!ret) {
-			rate = exynos9820_gpu_cal_done(id, rate);
 			vclk = cmucal_get_node(id);
 			if (vclk)
 				vclk->vrate = (unsigned int)rate;
-		} else {
-			exynos9820_gpu_cal_abort();
 		}
 	} else {
 		ret = vclk_set_rate(id, rate);
