@@ -25,7 +25,6 @@
 
 #include <gpex_utils.h>
 #include <gpexbe_devicetree.h>
-#include <soc/samsung/cal-if.h>
 
 #define CPU_MAX INT_MAX
 static gpu_dt dt_info;
@@ -314,12 +313,6 @@ int gpexbe_devicetree_init(struct device *dev)
 	read_from_dt();
 	build_clk_table();
 	build_cl_pmqos_table();
-	if (clock_table && dt_info.gpu_dvfs_table_size.row > 0) {
-		dt_info.gpu_max_clock = exynos9820_gpu_oc_rate(dt_info.gpu_max_clock);
-		clock_table[0].clock = exynos9820_gpu_oc_rate(clock_table[0].clock);
-		if (clqos_table && dt_info.gpu_cl_pmqos_table_size.row > 0)
-			clqos_table[0].clock = exynos9820_gpu_oc_rate(clqos_table[0].clock);
-	}
 	read_interactive_info_array();
 
 	dt_info.gpu_dvfs_table = clock_table;

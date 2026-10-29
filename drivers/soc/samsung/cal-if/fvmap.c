@@ -11,7 +11,6 @@
 #include "cmucal.h"
 #include "vclk.h"
 #include "ra.h"
-#include "exynos9820-oc.h"
 
 #define FVMAP_SIZE		(SZ_8K)
 #define STEP_UV			(6250)
@@ -451,10 +450,6 @@ static void fvmap_copy_from_sram(void __iomem *map_base, void __iomem *sram_base
 		check_percent_margin(old, fvmap_header[i].num_of_lv);
 
 		margin = init_margin_table[vclk->margin_id];
-		if (margin && vclk->margin_id == MARGIN_BIG && exynos9820_oc_defer_big())
-			margin = 0;
-		if (margin && vclk->margin_id == MARGIN_G3D && exynos9820_oc_defer_g3d())
-			margin = 0;
 		if (margin)
 			cal_dfs_set_volt_margin(i | ACPM_VCLK_TYPE, margin);
 
@@ -521,26 +516,6 @@ int fvmap_init(void __iomem *sram_base)
 	sram_fvmap_base = sram_base;
 	pr_info("%s:fvmap initialize %p\n", __func__, sram_base);
 	fvmap_copy_from_sram(map_base, sram_base);
-	exynos9820_oc_init(map_base, sram_base);
-	if (exynos9820_oc_defer_big() &&
-	    (!exynos9820_oc_big_enabled() || exynos9820_oc_big_keep_uv())) {
-		int id = get_vclk_id_from_margin_id(MARGIN_BIG);
-
-		if (id >= 0 && init_margin_table[MARGIN_BIG])
-			cal_dfs_set_volt_margin(id | ACPM_VCLK_TYPE,
-						init_margin_table[MARGIN_BIG]);
-	} else if (exynos9820_oc_big_enabled()) {
-		percent_margin_table[MARGIN_BIG] = 0;
-	}
-	if (exynos9820_oc_defer_g3d() && !exynos9820_oc_gpu_enabled()) {
-		int id = get_vclk_id_from_margin_id(MARGIN_G3D);
-
-		if (id >= 0 && init_margin_table[MARGIN_G3D])
-			cal_dfs_set_volt_margin(id | ACPM_VCLK_TYPE,
-						init_margin_table[MARGIN_G3D]);
-	} else if (exynos9820_oc_gpu_enabled()) {
-		percent_margin_table[MARGIN_G3D] = 0;
-	}
 
 	/* percent margin for each doamin at runtime */
 	kobj = kobject_create_and_add("percent_margin", power_kobj);
