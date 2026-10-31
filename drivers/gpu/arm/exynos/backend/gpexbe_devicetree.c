@@ -22,9 +22,11 @@
 #include <linux/of.h>
 #include <linux/sysfs.h>
 #include <linux/slab.h>
+#include <linux/string.h>
 
 #include <gpex_utils.h>
 #include <gpexbe_devicetree.h>
+#include <soc/samsung/cal-if.h>
 
 #define CPU_MAX INT_MAX
 static gpu_dt dt_info;
@@ -313,6 +315,51 @@ int gpexbe_devicetree_init(struct device *dev)
 	read_from_dt();
 	build_clk_table();
 	build_cl_pmqos_table();
+	if (clock_table && dt_info.gpu_dvfs_table_size.row > 0) {
+		unsigned int rows = dt_info.gpu_dvfs_table_size.row;
+		unsigned int steps[2];
+		unsigned int n = exynos9820_gpu_oc_steps(clock_table[0].clock, steps, 2);
+		unsigned int i;
+		void *grown;
+
+		if (n) {
+			struct _dt_clock_item top = clock_table[0];
+
+			grown = krealloc(clock_table,
+					 (rows + n) * sizeof(*clock_table), GFP_KERNEL);
+			if (grown) {
+				clock_table = grown;
+				memmove(&clock_table[n], &clock_table[0],
+					rows * sizeof(*clock_table));
+				for (i = 0; i < n; i++) {
+					clock_table[i] = top;
+					clock_table[i].clock = steps[i];
+					clock_table[i].max_threshold = i == 0 ? 90 : 98;
+				}
+				clock_table[n].max_threshold = 98;
+				dt_info.gpu_dvfs_table_size.row = rows + n;
+				dt_info.gpu_max_clock = steps[0];
+			}
+			if (clqos_table && grown &&
+			    dt_info.gpu_cl_pmqos_table_size.row == rows) {
+				struct _dt_clqos_item top_qos = clqos_table[0];
+
+				grown = krealloc(clqos_table,
+						 (rows + n) * sizeof(*clqos_table),
+						 GFP_KERNEL);
+				if (grown) {
+					clqos_table = grown;
+					memmove(&clqos_table[n], &clqos_table[0],
+						rows * sizeof(*clqos_table));
+					for (i = 0; i < n; i++) {
+						clqos_table[i] = top_qos;
+						clqos_table[i].clock = steps[i];
+					}
+					dt_info.gpu_cl_pmqos_table_size.row = rows + n;
+				}
+			}
+		}
+	}
 	read_interactive_info_array();
 
 	dt_info.gpu_dvfs_table = clock_table;

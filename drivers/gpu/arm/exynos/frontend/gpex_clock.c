@@ -19,6 +19,7 @@
  */
 
 #include <linux/slab.h>
+#include <soc/samsung/cal-if.h>
 
 #include <gpex_clock.h>
 #include <gpex_qos.h>
@@ -119,6 +120,24 @@ static int gpex_clock_update_config_data_from_dt(void)
 
 	kfree(fv_array);
 
+	if (clk_info.table && clk_info.table_size > 1) {
+		dt_clock_item *dt_clock_table = gpexbe_devicetree_get_clock_table();
+		unsigned int base = 0;
+
+		while (base < clk_info.table_size && !clk_info.table[base].clock)
+			base++;
+		if (dt_clock_table && base > 0 && base < clk_info.table_size) {
+			for (i = 0; i < base; i++) {
+				clk_info.table[i].clock = dt_clock_table[i].clock;
+				clk_info.table[i].voltage = clk_info.table[base].voltage;
+			}
+			if (clk_info.gpu_max_clock < dt_clock_table[0].clock)
+				clk_info.gpu_max_clock = dt_clock_table[0].clock;
+			if (clk_info.gpu_max_clock_limit < dt_clock_table[0].clock)
+				clk_info.gpu_max_clock_limit = dt_clock_table[0].clock;
+		}
+	}
+
 	return 0;
 }
 
@@ -147,11 +166,11 @@ static int set_clock_using_calapi(int clk)
 
 	gpexbe_debug_dbg_snapshot_freq_in(clk_info.cur_clock, clk);
 
+	exynos9820_uv_prepare_gpu(clk_info.cur_clock, clk);
 	gpexbe_clock_set_rate(clk);
-
 	gpexbe_debug_dbg_snapshot_freq_out(clk_info.cur_clock, clk);
-
 	clk_info.cur_clock = gpexbe_clock_get_rate();
+	exynos9820_uv_finish_gpu(clk_info.cur_clock);
 
 	GPU_LOG_DETAILED(MALI_EXYNOS_DEBUG, LSI_CLOCK_VALUE, clk, clk_info.cur_clock,
 			 "clock set: %d, clock get: %d\n", clk, clk_info.cur_clock);

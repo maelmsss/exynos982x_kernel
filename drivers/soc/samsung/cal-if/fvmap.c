@@ -5,12 +5,15 @@
 #include <linux/debugfs.h>
 #include <linux/uaccess.h>
 #include <linux/kobject.h>
+#include <linux/workqueue.h>
+#include <linux/thermal.h>
 #include <soc/samsung/cal-if.h>
 
 #include "fvmap.h"
 #include "cmucal.h"
 #include "vclk.h"
 #include "ra.h"
+#include "exynos9820-oc.h"
 
 #define FVMAP_SIZE		(SZ_8K)
 #define STEP_UV			(6250)
@@ -21,12 +24,12 @@ void __iomem *sram_fvmap_base;
 static int init_margin_table[MAX_MARGIN_ID] = {
 	[MARGIN_BIG] = -5,
 	[MARGIN_MID] = -5,
-	[MARGIN_G3D] = -3,
+	[MARGIN_G3D] = 0,
 };
 static int percent_margin_table[MAX_MARGIN_ID] = {
 	[MARGIN_BIG] = -5,
 	[MARGIN_MID] = -5,
-	[MARGIN_G3D] = -3,
+	[MARGIN_G3D] = 0,
 };
 
 static int volt_offset_percent;
@@ -398,6 +401,115 @@ static const struct attribute_group percent_margin_group = {
 	.attrs = percent_margin_attrs,
 };
 
+static void exynos9820_uv_set(int margin_id, int percent)
+{
+	int id;
+
+	if (margin_id < 0 || margin_id >= MAX_MARGIN_ID)
+		return;
+	if (percent_margin_table[margin_id] == percent)
+		return;
+	id = get_vclk_id_from_margin_id(margin_id);
+	if (id < 0)
+		return;
+	percent_margin_table[margin_id] = percent;
+	cal_dfs_set_volt_margin(id | ACPM_VCLK_TYPE, percent);
+}
+
+static unsigned int margin_of_cal(unsigned int cal_id)
+{
+	struct vclk *vclk = cmucal_get_node(cal_id);
+
+	return vclk ? vclk->margin_id : MAX_MARGIN_ID;
+}
+
+void exynos9820_uv_prepare_cpu(unsigned int cal_id, unsigned int old_khz,
+		unsigned int new_khz)
+{
+	unsigned int margin_id = margin_of_cal(cal_id);
+	int old_percent, new_percent;
+
+	if (!exynos9820_cpu_margin_for_freq(margin_id, old_khz, &old_percent))
+		return;
+	if (!exynos9820_cpu_margin_for_freq(margin_id, new_khz, &new_percent))
+		return;
+	if (new_percent > old_percent)
+		exynos9820_uv_set(margin_id, new_percent);
+}
+
+void exynos9820_uv_finish_cpu(unsigned int cal_id, unsigned int khz)
+{
+	unsigned int margin_id = margin_of_cal(cal_id);
+	int percent;
+
+	if (exynos9820_cpu_margin_for_freq(margin_id, khz, &percent))
+		exynos9820_uv_set(margin_id, percent);
+}
+
+void exynos9820_uv_prepare_gpu(unsigned int old_khz, unsigned int new_khz)
+{
+	int old_percent, new_percent;
+
+	if (!exynos9820_gpu_margin_for_freq(old_khz, &old_percent))
+		return;
+	if (!exynos9820_gpu_margin_for_freq(new_khz, &new_percent))
+		return;
+	if (new_percent > old_percent)
+		exynos9820_uv_set(MARGIN_G3D, new_percent);
+}
+
+void exynos9820_uv_finish_gpu(unsigned int khz)
+{
+	int percent;
+
+	if (exynos9820_gpu_margin_for_freq(khz, &percent))
+		exynos9820_uv_set(MARGIN_G3D, percent);
+}
+
+/* Cool: BIG < 65C and battery < 37C -> -3%. Hot: BIG >= 78C or battery >= 42C -> 0.
+ * The band in between holds the last decision. A missing sensor forces 0.
+ */
+static int smart_uv;
+static bool smart_uv_sensors_warned;
+static struct delayed_work smart_uv_work;
+
+static int smart_uv_zone_mc(const char *name, int *temp)
+{
+	struct thermal_zone_device *tz;
+
+	tz = thermal_zone_get_zone_by_name(name);
+	if (IS_ERR(tz))
+		return -ENODEV;
+	return thermal_zone_get_temp(tz, temp);
+}
+
+static void smart_uv_fn(struct work_struct *work)
+{
+	int big = 0, bat = 0, next;
+
+	(void)work;
+	if (smart_uv_zone_mc("BIG", &big) || smart_uv_zone_mc("battery", &bat)) {
+		next = 0;
+		if (!smart_uv_sensors_warned) {
+			pr_info("smart-uv: BIG or battery unreadable, g3d margin 0\n");
+			smart_uv_sensors_warned = true;
+		}
+	} else if (big >= 78000 || bat >= 42000) {
+		next = 0;
+	} else if (big < 65000 && bat < 37000) {
+		next = -3;
+	} else {
+		next = smart_uv;
+	}
+
+	if (next != smart_uv) {
+		smart_uv = next;
+		exynos9820_uv_set(MARGIN_G3D, next);
+		pr_info("smart-uv: g3d %d%% big=%d bat=%d\n", next, big, bat);
+	}
+	schedule_delayed_work(&smart_uv_work, 5 * HZ);
+}
+
 static void fvmap_copy_from_sram(void __iomem *map_base, void __iomem *sram_base)
 {
 	volatile struct fvmap_header *fvmap_header, *header;
@@ -450,6 +562,10 @@ static void fvmap_copy_from_sram(void __iomem *map_base, void __iomem *sram_base
 		check_percent_margin(old, fvmap_header[i].num_of_lv);
 
 		margin = init_margin_table[vclk->margin_id];
+		if (margin && vclk->margin_id == MARGIN_BIG && exynos9820_oc_defer_big())
+			margin = 0;
+		if (margin && vclk->margin_id == MARGIN_G3D && exynos9820_oc_defer_g3d())
+			margin = 0;
 		if (margin)
 			cal_dfs_set_volt_margin(i | ACPM_VCLK_TYPE, margin);
 
@@ -516,6 +632,24 @@ int fvmap_init(void __iomem *sram_base)
 	sram_fvmap_base = sram_base;
 	pr_info("%s:fvmap initialize %p\n", __func__, sram_base);
 	fvmap_copy_from_sram(map_base, sram_base);
+	exynos9820_oc_init(map_base, sram_base);
+	if (exynos9820_oc_defer_big() &&
+	    (!exynos9820_oc_big_enabled() || exynos9820_oc_big_keep_uv())) {
+		int id = get_vclk_id_from_margin_id(MARGIN_BIG);
+
+		if (id >= 0 && init_margin_table[MARGIN_BIG])
+			cal_dfs_set_volt_margin(id | ACPM_VCLK_TYPE,
+						init_margin_table[MARGIN_BIG]);
+	} else if (exynos9820_oc_big_enabled()) {
+		percent_margin_table[MARGIN_BIG] = 0;
+	}
+	if (exynos9820_oc_defer_g3d() && init_margin_table[MARGIN_G3D]) {
+		int id = get_vclk_id_from_margin_id(MARGIN_G3D);
+
+		if (id >= 0)
+			cal_dfs_set_volt_margin(id | ACPM_VCLK_TYPE,
+						init_margin_table[MARGIN_G3D]);
+	}
 
 	/* percent margin for each doamin at runtime */
 	kobj = kobject_create_and_add("percent_margin", power_kobj);
@@ -524,6 +658,9 @@ int fvmap_init(void __iomem *sram_base)
 
 	if (sysfs_create_group(kobj, &percent_margin_group))
 		pr_err("Fail to create percent_margin group\n");
+
+	INIT_DELAYED_WORK(&smart_uv_work, smart_uv_fn);
+	schedule_delayed_work(&smart_uv_work, 10 * HZ);
 
 	return 0;
 }
