@@ -6,6 +6,7 @@
  */
 
 #include <linux/memcontrol.h>
+#include <linux/mm_inline.h>
 #include <linux/writeback.h>
 #include <linux/shmem_fs.h>
 #include <linux/pagemap.h>
@@ -184,7 +185,6 @@ static unsigned int bucket_order __read_mostly;
 static void *pack_shadow(int memcgid, pg_data_t *pgdat, unsigned long eviction,
 			 bool workingset)
 {
-	eviction >>= bucket_order;
 	eviction = (eviction << MEM_CGROUP_ID_SHIFT) | memcgid;
 	eviction = (eviction << NODES_SHIFT) | pgdat->node_id;
 	eviction = (eviction << 1) | workingset;
@@ -210,9 +210,107 @@ static void unpack_shadow(void *shadow, int *memcgidp, pg_data_t **pgdat,
 
 	*memcgidp = memcgid;
 	*pgdat = NODE_DATA(nid);
-	*evictionp = entry << bucket_order;
+	*evictionp = entry;
 	*workingsetp = workingset;
 }
+
+#ifdef CONFIG_LRU_GEN
+
+/*
+ * The referenced count occupies LRU_REFS_WIDTH+2 bits in page flags, but
+ * when packing a shadow entry only the count shifted right by one is stored
+ * in the token; the low bit is stored separately as the workingset bit.
+ */
+#define LRU_REFS_BITS ((LRU_REFS_WIDTH + 2) - 1)
+
+void *lru_gen_eviction(struct page *page)
+{
+	int hist, tier;
+	unsigned long token;
+	unsigned long min_seq;
+	struct lruvec *lruvec;
+	struct lru_gen_struct *lrugen;
+	int type = page_is_file_cache(page);
+	int refs = page_lru_refs(page);
+	int delta = hpage_nr_pages(page);
+	struct mem_cgroup *memcg = page_memcg(page);
+	struct pglist_data *pgdat = page_pgdat(page);
+
+	BUILD_BUG_ON(LRU_GEN_WIDTH + LRU_REFS_BITS > BITS_PER_LONG - EVICTION_SHIFT);
+
+	if (!mem_cgroup_disabled() && !memcg)
+		return NULL;
+
+	lruvec = mem_cgroup_lruvec(pgdat, memcg);
+	lrugen = &lruvec->lrugen;
+	min_seq = READ_ONCE(lrugen->min_seq[type]);
+	token = (min_seq << LRU_REFS_BITS) | (refs >> 1);
+
+	hist = lru_hist_from_seq(min_seq);
+	tier = lru_tier_from_refs(refs);
+	atomic_long_add(delta, &lrugen->evicted[hist][type][tier]);
+
+	return pack_shadow(mem_cgroup_id(memcg), pgdat, token, refs & 1);
+}
+
+void lru_gen_refault(struct page *page, void *shadow)
+{
+	int hist, tier, refs;
+	int memcg_id;
+	bool workingset;
+	unsigned long token;
+	unsigned long min_seq;
+	struct lruvec *lruvec;
+	struct lru_gen_struct *lrugen;
+	struct mem_cgroup *memcg;
+	struct pglist_data *pgdat;
+	int type = page_is_file_cache(page);
+	int delta = hpage_nr_pages(page);
+
+	unpack_shadow(shadow, &memcg_id, &pgdat, &token, &workingset);
+
+	refs = ((token & (BIT(LRU_REFS_BITS) - 1)) << 1) + workingset;
+
+	if (page_pgdat(page) != pgdat)
+		return;
+
+	rcu_read_lock();
+	memcg = mem_cgroup_from_id(memcg_id);
+	if (!mem_cgroup_disabled() && !memcg)
+		goto unlock;
+
+	token >>= LRU_REFS_BITS;
+	lruvec = mem_cgroup_lruvec(pgdat, memcg);
+	lrugen = &lruvec->lrugen;
+	min_seq = READ_ONCE(lrugen->min_seq[type]);
+	if (token != (min_seq & (EVICTION_MASK >> LRU_REFS_BITS)))
+		goto unlock;
+
+	hist = lru_hist_from_seq(min_seq);
+	tier = lru_tier_from_refs(refs);
+	atomic_long_add(delta, &lrugen->refaulted[hist][type][tier]);
+	mod_lruvec_state(lruvec, WORKINGSET_REFAULT, delta);
+
+	/*
+	 * Activate a fault-driven refault page, which would have been
+	 * promoted had it stayed in memory.
+	 */
+	if (refs >= LRU_REFS_REFERENCED) {
+		if (lru_gen_in_fault()) {
+			SetPageActive(page);
+			mod_lruvec_state(lruvec, WORKINGSET_ACTIVATE, delta);
+		}
+		/* Refault is also promotion, cap the refs like lru_gen_inc_refs */
+		__page_set_lru_refs(page, min(refs, LRU_REFS_PROTECTED));
+	}
+
+	if (refs >= LRU_REFS_WORKINGSET)
+		mod_lruvec_state(lruvec, WORKINGSET_RESTORE, delta);
+unlock:
+	rcu_read_unlock();
+}
+
+#endif /* CONFIG_LRU_GEN */
 
 /**
  * workingset_eviction - note the eviction of a page from memory
@@ -235,9 +333,13 @@ void *workingset_eviction(struct address_space *mapping, struct page *page)
 	VM_BUG_ON_PAGE(page_count(page), page);
 	VM_BUG_ON_PAGE(!PageLocked(page), page);
 
+	if (lru_gen_enabled())
+		return lru_gen_eviction(page);
+
 	lruvec = mem_cgroup_lruvec(pgdat, memcg);
 	eviction = atomic_long_inc_return(&lruvec->inactive_age);
-	return pack_shadow(memcgid, pgdat, eviction, PageWorkingset(page));
+	eviction >>= bucket_order;
+	return pack_shadow(memcgid, pgdat, eviction, page_test_workingset(page));
 }
 
 /**
@@ -260,7 +362,13 @@ void workingset_refault(struct page *page, void *shadow)
 	bool workingset;
 	int memcgid;
 
+	if (lru_gen_enabled()) {
+		lru_gen_refault(page, shadow);
+		return;
+	}
+
 	unpack_shadow(shadow, &memcgid, &pgdat, &eviction, &workingset);
+	eviction <<= bucket_order;
 
 	rcu_read_lock();
 	/*
@@ -320,7 +428,7 @@ void workingset_refault(struct page *page, void *shadow)
 
 	/* Page was active prior to eviction */
 	if (workingset) {
-		SetPageWorkingset(page);
+		page_set_workingset(page);
 		inc_lruvec_state(lruvec, WORKINGSET_RESTORE);
 	}
 out:
