@@ -8,7 +8,7 @@
  * S10 keeps 702 and adds 754 and 806. N10 keeps 754 and adds 806.
  * 806 is requested by default. exynos9820_gpu_oc=0 turns it off.
  * CPU overclock is not requested. The per-frequency voltage switch is
- * gone: G3D margin is decided from BIG and battery temperature in fvmap.
+ * gone: little, mid, big and G3D share one margin from load and temperature.
  * No rail value is invented.
  */
 

@@ -7,6 +7,9 @@
 #include <linux/kobject.h>
 #include <linux/workqueue.h>
 #include <linux/thermal.h>
+#include <linux/kernel_stat.h>
+#include <linux/math64.h>
+#include <linux/power_supply.h>
 #include <soc/samsung/cal-if.h>
 
 #include "fvmap.h"
@@ -21,16 +24,8 @@
 void __iomem *fvmap_base;
 void __iomem *sram_fvmap_base;
 
-static int init_margin_table[MAX_MARGIN_ID] = {
-	[MARGIN_BIG] = -5,
-	[MARGIN_MID] = -5,
-	[MARGIN_G3D] = 0,
-};
-static int percent_margin_table[MAX_MARGIN_ID] = {
-	[MARGIN_BIG] = -5,
-	[MARGIN_MID] = -5,
-	[MARGIN_G3D] = 0,
-};
+static int init_margin_table[MAX_MARGIN_ID];
+static int percent_margin_table[MAX_MARGIN_ID];
 
 static int volt_offset_percent;
 
@@ -466,11 +461,16 @@ void exynos9820_uv_finish_gpu(unsigned int khz)
 		exynos9820_uv_set(MARGIN_G3D, percent);
 }
 
-/* Cool: BIG < 65C and battery < 37C -> -3%. Hot: BIG >= 78C or battery >= 42C -> 0.
- * The band in between holds the last decision. A missing sensor forces 0.
+/* Same percent on little, mid, big and G3D. -3 only while busy and cool:
+ * load >= 65 (held down to 35), BIG < 65C and battery < 37C. Otherwise 0.
+ * A missing sensor forces 0. Load is the /proc/stat busy percent.
  */
 static int smart_uv;
 static bool smart_uv_sensors_warned;
+static bool smart_uv_boost;
+static bool smart_uv_have_load;
+static u64 smart_uv_total_prev;
+static u64 smart_uv_idle_prev;
 static struct delayed_work smart_uv_work;
 
 static int smart_uv_zone_mc(const char *name, int *temp)
@@ -483,29 +483,99 @@ static int smart_uv_zone_mc(const char *name, int *temp)
 	return thermal_zone_get_temp(tz, temp);
 }
 
+static int smart_uv_load_percent(void)
+{
+	u64 user = 0, nice = 0, system = 0, idle = 0, iowait = 0;
+	u64 irq = 0, softirq = 0, steal = 0, total, idle_all, delta, idle_delta;
+	int cpu, load;
+	struct kernel_cpustat *kcs;
+
+	for_each_possible_cpu(cpu) {
+		kcs = &kcpustat_cpu(cpu);
+		user += kcs->cpustat[CPUTIME_USER];
+		nice += kcs->cpustat[CPUTIME_NICE];
+		system += kcs->cpustat[CPUTIME_SYSTEM];
+		idle += kcs->cpustat[CPUTIME_IDLE];
+		iowait += kcs->cpustat[CPUTIME_IOWAIT];
+		irq += kcs->cpustat[CPUTIME_IRQ];
+		softirq += kcs->cpustat[CPUTIME_SOFTIRQ];
+		steal += kcs->cpustat[CPUTIME_STEAL];
+	}
+	total = user + nice + system + idle + iowait + irq + softirq + steal;
+	idle_all = idle + iowait;
+	if (!smart_uv_have_load || total <= smart_uv_total_prev) {
+		smart_uv_total_prev = total;
+		smart_uv_idle_prev = idle_all;
+		smart_uv_have_load = true;
+		return 0;
+	}
+	delta = total - smart_uv_total_prev;
+	idle_delta = idle_all > smart_uv_idle_prev ? idle_all - smart_uv_idle_prev : delta;
+	if (idle_delta > delta)
+		idle_delta = delta;
+	smart_uv_total_prev = total;
+	smart_uv_idle_prev = idle_all;
+	load = div64_u64((delta - idle_delta) * 100, delta);
+	return load > 100 ? 100 : load;
+}
+
+static void smart_uv_battery(int *capacity, bool *charging)
+{
+	struct power_supply *psy;
+	union power_supply_propval val;
+
+	*capacity = 100;
+	*charging = false;
+	psy = power_supply_get_by_name("battery");
+	if (!psy)
+		return;
+	if (!power_supply_get_property(psy, POWER_SUPPLY_PROP_CAPACITY, &val))
+		*capacity = val.intval;
+	if (!power_supply_get_property(psy, POWER_SUPPLY_PROP_STATUS, &val))
+		*charging = val.intval == POWER_SUPPLY_STATUS_CHARGING;
+	power_supply_put(psy);
+}
+
+static void smart_uv_apply(int percent)
+{
+	exynos9820_uv_set(MARGIN_LIT, percent);
+	exynos9820_uv_set(MARGIN_MID, percent);
+	exynos9820_uv_set(MARGIN_BIG, percent);
+	exynos9820_uv_set(MARGIN_G3D, percent);
+}
+
 static void smart_uv_fn(struct work_struct *work)
 {
-	int big = 0, bat = 0, next;
+	int big = 0, bat = 0, load, capacity, ceiling, next;
+	bool charging, cool, hold, boost;
 
 	(void)work;
+	load = smart_uv_load_percent();
 	if (smart_uv_zone_mc("BIG", &big) || smart_uv_zone_mc("battery", &bat)) {
 		next = 0;
+		smart_uv_boost = false;
 		if (!smart_uv_sensors_warned) {
-			pr_info("smart-uv: BIG or battery unreadable, g3d margin 0\n");
+			pr_info("smart-uv: BIG or battery unreadable, margin 0\n");
 			smart_uv_sensors_warned = true;
 		}
-	} else if (big >= 78000 || bat >= 42000) {
-		next = 0;
-	} else if (big < 65000 && bat < 37000) {
-		next = -3;
 	} else {
-		next = smart_uv;
+		smart_uv_battery(&capacity, &charging);
+		ceiling = charging ? 37000 : 39000;
+		cool = big < 70000 && bat < ceiling;
+		hold = smart_uv_boost && big < 72000 && bat < ceiling + 1000 &&
+			load >= 35;
+		boost = (cool && load >= 65) || hold;
+		if (capacity <= 15 && !charging)
+			boost = false;
+		smart_uv_boost = boost;
+		next = (boost && big < 65000 && bat < 37000) ? -3 : 0;
 	}
 
 	if (next != smart_uv) {
 		smart_uv = next;
-		exynos9820_uv_set(MARGIN_G3D, next);
-		pr_info("smart-uv: g3d %d%% big=%d bat=%d\n", next, big, bat);
+		smart_uv_apply(next);
+		pr_info("smart-uv: %d%% load=%d big=%d bat=%d\n",
+			next, load, big, bat);
 	}
 	schedule_delayed_work(&smart_uv_work, 5 * HZ);
 }
