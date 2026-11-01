@@ -462,7 +462,8 @@ void exynos9820_uv_finish_gpu(unsigned int khz)
 }
 
 /* Same percent on little, mid, big and G3D. -3 only while busy and cool:
- * load >= 65 (held down to 35), BIG < 65C and battery < 37C. Otherwise 0.
+ * load >= 65 (held down to 35), the hottest of BIG, MID and G3D below 65C,
+ * and the power_supply battery below 37C. Otherwise 0.
  * A missing sensor forces 0. Load is the /proc/stat busy percent.
  */
 static int smart_uv;
@@ -519,7 +520,23 @@ static int smart_uv_load_percent(void)
 	return load > 100 ? 100 : load;
 }
 
-static void smart_uv_battery(int *capacity, bool *charging)
+static int smart_uv_hottest(int *temp)
+{
+	static const char * const names[] = { "BIG", "MID", "G3D" };
+	int i, cur, hottest = 0;
+
+	for (i = 0; i < 3; i++) {
+		if (smart_uv_zone_mc(names[i], &cur))
+			return -ENODEV;
+		if (!i || cur > hottest)
+			hottest = cur;
+	}
+	*temp = hottest;
+	return 0;
+}
+
+/* power_supply temperature is in tenths of a degree. */
+static int smart_uv_battery(int *temp_mc, int *capacity, bool *charging)
 {
 	struct power_supply *psy;
 	union power_supply_propval val;
@@ -528,12 +545,18 @@ static void smart_uv_battery(int *capacity, bool *charging)
 	*charging = false;
 	psy = power_supply_get_by_name("battery");
 	if (!psy)
-		return;
+		return -ENODEV;
+	if (power_supply_get_property(psy, POWER_SUPPLY_PROP_TEMP, &val)) {
+		power_supply_put(psy);
+		return -EIO;
+	}
+	*temp_mc = val.intval * 100;
 	if (!power_supply_get_property(psy, POWER_SUPPLY_PROP_CAPACITY, &val))
 		*capacity = val.intval;
 	if (!power_supply_get_property(psy, POWER_SUPPLY_PROP_STATUS, &val))
 		*charging = val.intval == POWER_SUPPLY_STATUS_CHARGING;
 	power_supply_put(psy);
+	return 0;
 }
 
 static void smart_uv_apply(int percent)
@@ -546,36 +569,35 @@ static void smart_uv_apply(int percent)
 
 static void smart_uv_fn(struct work_struct *work)
 {
-	int big = 0, bat = 0, load, capacity, ceiling, next;
+	int hot = 0, bat = 0, load, capacity, ceiling, next;
 	bool charging, cool, hold, boost;
 
 	(void)work;
 	load = smart_uv_load_percent();
-	if (smart_uv_zone_mc("BIG", &big) || smart_uv_zone_mc("battery", &bat)) {
+	if (smart_uv_hottest(&hot) || smart_uv_battery(&bat, &capacity, &charging)) {
 		next = 0;
 		smart_uv_boost = false;
 		if (!smart_uv_sensors_warned) {
-			pr_info("smart-uv: BIG or battery unreadable, margin 0\n");
+			pr_info("smart-uv: thermal or battery unreadable, margin 0\n");
 			smart_uv_sensors_warned = true;
 		}
 	} else {
-		smart_uv_battery(&capacity, &charging);
 		ceiling = charging ? 37000 : 39000;
-		cool = big < 70000 && bat < ceiling;
-		hold = smart_uv_boost && big < 72000 && bat < ceiling + 1000 &&
+		cool = hot < 70000 && bat < ceiling;
+		hold = smart_uv_boost && hot < 72000 && bat < ceiling + 1000 &&
 			load >= 35;
 		boost = (cool && load >= 65) || hold;
 		if (capacity <= 15 && !charging)
 			boost = false;
 		smart_uv_boost = boost;
-		next = (boost && big < 65000 && bat < 37000) ? -3 : 0;
+		next = (boost && hot < 65000 && bat < 37000) ? -3 : 0;
 	}
 
 	if (next != smart_uv) {
 		smart_uv = next;
 		smart_uv_apply(next);
-		pr_info("smart-uv: %d%% load=%d big=%d bat=%d\n",
-			next, load, big, bat);
+		pr_info("smart-uv: %d%% load=%d hot=%d bat=%d\n",
+			next, load, hot, bat);
 	}
 	schedule_delayed_work(&smart_uv_work, 5 * HZ);
 }
