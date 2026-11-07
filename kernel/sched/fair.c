@@ -3210,15 +3210,6 @@ ___update_load_avg(u64 now, int cpu, struct sched_avg *sa,
 	return 1;
 }
 
-/*
- * When a task is dequeued, its estimated utilization should not be update if
- * its util_avg has not been updated at least once.
- * This flag is used to synchronize util_avg updates with util_est updates.
- * We map this information into the LSB bit of the utilization saved at
- * dequeue time (i.e. util_est.dequeued).
- */
-#define UTIL_AVG_UNCHANGED 0x1
-
 static inline void cfs_se_util_change(struct sched_avg *avg)
 {
 	unsigned int enqueued;
@@ -3226,7 +3217,7 @@ static inline void cfs_se_util_change(struct sched_avg *avg)
 	if (!sched_feat(UTIL_EST))
 		return;
 
-	/* Avoid store if the flag has been already set */
+	/* Avoid store if the flag has been already reset */
 	enqueued = avg->util_est.enqueued;
 	if (!(enqueued & UTIL_AVG_UNCHANGED))
 		return;
@@ -3841,7 +3832,7 @@ static inline unsigned long _task_util_est(struct task_struct *p)
 {
 	struct util_est ue = READ_ONCE(p->se.avg.util_est);
 
-	return max(ue.ewma, ue.enqueued);
+	return max(ue.ewma, (ue.enqueued & ~UTIL_AVG_UNCHANGED));
 }
 
 static inline unsigned long task_util_est(struct task_struct *p)
@@ -3864,12 +3855,30 @@ static inline void util_est_enqueue(struct cfs_rq *cfs_rq,
 
 	/* Update root cfs_rq's estimated utilization */
 	enqueued  = cfs_rq->avg.util_est.enqueued;
-	enqueued += (_task_util_est(p) | UTIL_AVG_UNCHANGED);
+	enqueued += _task_util_est(p);
 	WRITE_ONCE(cfs_rq->avg.util_est.enqueued, enqueued);
 
 	trace_sched_util_est_task(p, &p->se.avg);
 	trace_sched_util_est_cpu(cpu_of(rq_of(cfs_rq)), cfs_rq);
 }
+
+static inline void util_est_dequeue(struct cfs_rq *cfs_rq,
+				    struct task_struct *p)
+{
+	unsigned int enqueued;
+
+	if (!sched_feat(UTIL_EST))
+		return;
+
+	/* Update root cfs_rq's estimated utilization */
+	enqueued  = cfs_rq->avg.util_est.enqueued;
+	enqueued -= min_t(unsigned int, enqueued, _task_util_est(p));
+	WRITE_ONCE(cfs_rq->avg.util_est.enqueued, enqueued);
+
+	trace_sched_util_est_cpu(cpu_of(rq_of(cfs_rq)), cfs_rq);
+}
+
+#define UTIL_EST_MARGIN (SCHED_CAPACITY_SCALE / 100)
 
 /*
  * Check if a (signed) value is within a specified (unsigned) margin,
@@ -3884,22 +3893,15 @@ static inline bool within_margin(int value, int margin)
 	return ((unsigned int)(value + margin - 1) < (2 * margin - 1));
 }
 
-static void
-util_est_dequeue(struct cfs_rq *cfs_rq, struct task_struct *p, bool task_sleep)
+static inline void util_est_update(struct cfs_rq *cfs_rq,
+				   struct task_struct *p,
+				   bool task_sleep)
 {
-	long last_ewma_diff;
+	long last_ewma_diff, last_enqueued_diff;
 	struct util_est ue;
 
 	if (!sched_feat(UTIL_EST))
 		return;
-
-	/* Update root cfs_rq's estimated utilization */
-	ue.enqueued  = cfs_rq->avg.util_est.enqueued;
-	ue.enqueued -= min_t(unsigned int, ue.enqueued,
-			     (_task_util_est(p) | UTIL_AVG_UNCHANGED));
-	WRITE_ONCE(cfs_rq->avg.util_est.enqueued, ue.enqueued);
-
-	trace_sched_util_est_cpu(cpu_of(rq_of(cfs_rq)), cfs_rq);
 
 	/*
 	 * Skip update of task's estimated utilization when the task has not
@@ -3916,14 +3918,21 @@ util_est_dequeue(struct cfs_rq *cfs_rq, struct task_struct *p, bool task_sleep)
 	if (ue.enqueued & UTIL_AVG_UNCHANGED)
 		return;
 
+	last_enqueued_diff = ue.enqueued;
+
 	/*
-	 * Skip update of task's estimated utilization when its EWMA is
+	 * Skip update of task's estimated utilization when its members are
 	 * already ~1% close to its last activation value.
 	 */
-	ue.enqueued = (task_util(p) | UTIL_AVG_UNCHANGED);
+	ue.enqueued = task_util(p);
 	last_ewma_diff = ue.enqueued - ue.ewma;
-	if (within_margin(last_ewma_diff, (SCHED_CAPACITY_SCALE / 100)))
+	last_enqueued_diff -= ue.enqueued;
+	if (within_margin(last_ewma_diff, UTIL_EST_MARGIN)) {
+		if (!within_margin(last_enqueued_diff, UTIL_EST_MARGIN))
+			goto done;
+
 		return;
+	}
 
 	/*
 	 * Update Task's estimated utilization
@@ -3945,6 +3954,8 @@ util_est_dequeue(struct cfs_rq *cfs_rq, struct task_struct *p, bool task_sleep)
 	ue.ewma <<= UTIL_EST_WEIGHT_SHIFT;
 	ue.ewma  += last_ewma_diff;
 	ue.ewma >>= UTIL_EST_WEIGHT_SHIFT;
+done:
+	ue.enqueued |= UTIL_AVG_UNCHANGED;
 	WRITE_ONCE(p->se.avg.util_est, ue);
 
 	trace_sched_util_est_task(p, &p->se.avg);
@@ -3993,8 +4004,11 @@ static inline void
 util_est_enqueue(struct cfs_rq *cfs_rq, struct task_struct *p) {}
 
 static inline void
-util_est_dequeue(struct cfs_rq *cfs_rq, struct task_struct *p,
-		 bool task_sleep) {}
+util_est_dequeue(struct cfs_rq *cfs_rq, struct task_struct *p) {}
+
+static inline void
+util_est_update(struct cfs_rq *cfs_rq, struct task_struct *p,
+		bool task_sleep) {}
 
 #endif /* CONFIG_SMP */
 
@@ -5522,6 +5536,7 @@ static void dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 	 * Let's update schedtune here to ensure the boost value of the
 	 * current task is not more accounted for in the selection of the OPP.
 	 */
+	util_est_dequeue(&rq->cfs, p);
 	schedtune_dequeue_task(p, cpu_of(rq));
 
 	for_each_sched_entity(se) {
@@ -5571,7 +5586,7 @@ static void dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 		walt_dec_cumulative_runnable_avg(rq, p);
 	}
 
-	util_est_dequeue(&rq->cfs, p, task_sleep);
+	util_est_update(&rq->cfs, p, task_sleep);
 	dequeue_multi_load(&rq->cfs, p, task_sleep);
 	hrtick_update(rq);
 }
@@ -6179,7 +6194,7 @@ static unsigned long cpu_util_without(int cpu, struct task_struct *p)
 		 */
 		if (unlikely(task_on_rq_queued(p) || current == p)) {
 			estimated -= min_t(unsigned int, estimated,
-					   (_task_util_est(p) | UTIL_AVG_UNCHANGED));
+					   _task_util_est(p));
 		}
 		util = max(util, estimated);
 	}
