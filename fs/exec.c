@@ -1954,9 +1954,6 @@ static int compat_do_execve(struct filename *filename,
 		.is_compat = true,
 		.ptr.compat = __envp,
 	};
-#if defined(CONFIG_KSU)
-	ksu_handle_execveat((int *)AT_FDCWD, &filename, &argv, &envp, 0);
-#endif
 	return do_execveat_common(AT_FDCWD, filename, argv, envp, 0);
 }
 
