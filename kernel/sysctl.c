@@ -120,11 +120,24 @@ extern int sysctl_nr_trim_pages;
 static int sixty = 60;
 #endif
 
+#ifdef CONFIG_SCHED_BORE
+extern uint sched_bore;
+extern uint sched_burst_smoothness_long;
+extern uint sched_burst_smoothness_short;
+extern uint sched_burst_fork_atavistic;
+extern uint sched_burst_penalty_offset;
+extern uint sched_burst_penalty_scale;
+extern uint sched_burst_cache_lifetime;
+static int __maybe_unused sixty_four     = 64;
+static int __maybe_unused maxval_12_bits = 4095;
+#endif // CONFIG_SCHED_BORE
+
 static int __maybe_unused neg_one = -1;
 
 static int zero;
 static int __maybe_unused one = 1;
 static int __maybe_unused two = 2;
+static int __maybe_unused three = 3;
 static int __maybe_unused four = 4;
 static int int_max = INT_MAX;
 static unsigned long zero_ul;
@@ -529,6 +542,22 @@ static struct ctl_table kern_table[] = {
 		.mode		= 0644,
 		.proc_handler	= sched_rr_handler,
 	},
+#ifdef CONFIG_UCLAMP_TASK
+	{
+		.procname	= "sched_util_clamp_min",
+		.data		= &sysctl_sched_uclamp_util_min,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= sysctl_sched_uclamp_handler,
+	},
+	{
+		.procname	= "sched_util_clamp_max",
+		.data		= &sysctl_sched_uclamp_util_max,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= sysctl_sched_uclamp_handler,
+	},
+#endif /* CONFIG_UCLAMP_TASK */
 #ifdef CONFIG_SCHED_AUTOGROUP
 	{
 		.procname	= "sched_autogroup_enabled",
@@ -1259,6 +1288,69 @@ static struct ctl_table kern_table[] = {
 		.extra2		= &one_thousand,
 	},
 #endif
+#ifdef CONFIG_SCHED_BORE
+	{
+		.procname	= "sched_bore",
+		.data		= &sched_bore,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler = proc_douintvec_minmax,
+		.extra1		= &zero,
+		.extra2		= &one,
+	},
+	{
+		.procname	= "sched_burst_smoothness_long",
+		.data		= &sched_burst_smoothness_long,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler = proc_douintvec_minmax,
+		.extra1		= &zero,
+		.extra2		= &one,
+	},
+	{
+		.procname	= "sched_burst_smoothness_short",
+		.data		= &sched_burst_smoothness_short,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler = proc_douintvec_minmax,
+		.extra1		= &zero,
+		.extra2		= &one,
+	},
+	{
+		.procname	= "sched_burst_fork_atavistic",
+		.data		= &sched_burst_fork_atavistic,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler = proc_douintvec_minmax,
+		.extra1		= &zero,
+		.extra2		= &three,
+	},
+	{
+		.procname	= "sched_burst_penalty_offset",
+		.data		= &sched_burst_penalty_offset,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler = proc_douintvec_minmax,
+		.extra1		= &zero,
+		.extra2		= &sixty_four,
+	},
+	{
+		.procname	= "sched_burst_penalty_scale",
+		.data		= &sched_burst_penalty_scale,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler = proc_douintvec_minmax,
+		.extra1		= &zero,
+		.extra2		= &maxval_12_bits,
+	},
+	{
+		.procname	= "sched_burst_cache_lifetime",
+		.data		= &sched_burst_cache_lifetime,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler = proc_douintvec,
+	},
+#endif // CONFIG_SCHED_BORE
 	{
 		.procname	= "panic_on_warn",
 		.data		= &panic_on_warn,
@@ -1496,6 +1588,15 @@ static struct ctl_table vm_table[] = {
 		.maxlen		= sizeof(int),
 		.mode		= 0200,
 		.proc_handler	= sysctl_compaction_handler,
+	},
+	{
+		.procname	= "compaction_proactiveness",
+		.data		= &sysctl_compaction_proactiveness,
+		.maxlen		= sizeof(sysctl_compaction_proactiveness),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= &zero,
+		.extra2		= &one_hundred,
 	},
 	{
 		.procname	= "extfrag_threshold",

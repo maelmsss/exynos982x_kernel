@@ -489,12 +489,23 @@ static int __exynos_cpufreq_suspend(struct exynos_cpufreq_domain *domain)
 	pm_qos_update_request(&domain->min_qos_req, freq);
 	pm_qos_update_request(&domain->max_qos_req, freq);
 
-	/* To sync current freq with resume freq, check until they become same */
+	/* To sync current freq with resume freq, check until they become same.
+	 * update_freq() can fail to move domain->old. Without a way out this
+	 * loop holds the autosleep lock inside pm_suspend, wake_lock waits
+	 * forever and system_server's watchdog kills zygote.
+	 */
 	mutex_lock(&domain->lock);
 	while (domain->old > freq) {
+		unsigned int prev = domain->old;
+
 		mutex_unlock(&domain->lock);
 		update_freq(domain, freq);
 		mutex_lock(&domain->lock);
+		if (domain->old == prev) {
+			pr_warn("cpufreq: domain%d stuck at %u, suspend target %u\n",
+				domain->id, domain->old, freq);
+			break;
+		}
 	}
 
 	/*
@@ -1080,6 +1091,7 @@ static __init int init_table(struct exynos_cpufreq_domain *domain)
 
 				dev_pm_opp_add(get_cpu_device(cpu),
 						table[index] * 1000, volt_table[index]);
+				pr_info("volt_table[%d]=%d\n", index, volt_table[index]);
 			}
 		}
 

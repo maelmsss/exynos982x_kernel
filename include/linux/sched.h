@@ -348,11 +348,19 @@ struct load_weight {
  * Only for tasks we track a moving average of the past instantaneous
  * estimated utilization. This allows to absorb sporadic drops in utilization
  * of an otherwise almost periodic task.
+ *
+ * The UTIL_AVG_UNCHANGED flag is used to synchronize util_est with util_avg
+ * updates. When a task is dequeued, its util_est should not be updated if its
+ * util_avg has not been updated in the meantime.
+ * This information is mapped into the MSB bit of util_est.enqueued at dequeue
+ * time. Since max value of util_est.enqueued for a task is 1024 (PELT util_avg
+ * for a task) it is safe to use MSB.
  */
 struct util_est {
 	unsigned int			enqueued;
 	unsigned int			ewma;
 #define UTIL_EST_WEIGHT_SHIFT		2
+#define UTIL_AVG_UNCHANGED		0x80000000
 } __attribute__((__aligned__(sizeof(u64))));
 
 struct multi_load {
@@ -515,6 +523,16 @@ struct sched_entity {
 	u64				sum_exec_runtime;
 	u64				vruntime;
 	u64				prev_sum_exec_runtime;
+#ifdef CONFIG_SCHED_BORE
+	u64				burst_time;
+	u8				prev_burst_penalty;
+	u8				curr_burst_penalty;
+	u8				burst_penalty;
+	u8				burst_score;
+	u8				child_burst;
+	u32				child_burst_cnt;
+	u64				child_burst_last_cached;
+#endif // CONFIG_SCHED_BORE
 
 	u64				nr_migrations;
 
@@ -606,6 +624,32 @@ struct sched_rt_entity {
 	struct sched_avg		avg;// ____cacheline_aligned_in_smp;
 #endif
 } __randomize_layout;
+
+/*
+ * Utilization clamp identifiers.
+ */
+enum uclamp_id {
+	UCLAMP_MIN = 0,			/* Minimum utilization */
+	UCLAMP_MAX,			/* Maximum utilization */
+	UCLAMP_CNT			/* Number of clamp identifiers */
+};
+
+/* Number of utilization clamp buckets; upstream exposes this as a config. */
+#define UCLAMP_BUCKETS			5
+
+#ifdef CONFIG_UCLAMP_TASK
+/*
+ * The utilization clamp of a task: the value requested by user space, and
+ * the value finally applied once task-group and system-default restrictions
+ * have been taken into account.
+ */
+struct uclamp_se {
+	unsigned int value;		/* Clamp value */
+	unsigned int bucket_id;		/* Bucket the value falls into */
+	unsigned int active;		/* Task is RUNNABLE and refcounted */
+	unsigned int user_defined;	/* Set from user space */
+};
+#endif /* CONFIG_UCLAMP_TASK */
 
 struct sched_dl_entity {
 	struct rb_node			rb_node;
@@ -768,6 +812,15 @@ struct task_struct {
 #endif
 	struct sched_dl_entity		dl;
 
+#ifdef CONFIG_UCLAMP_TASK
+	/*
+	 * Clamp values requested for a task and the effective value, after
+	 * task-group and system-default restrictions have been applied.
+	 */
+	struct uclamp_se		uclamp_req[UCLAMP_CNT];
+	struct uclamp_se		uclamp[UCLAMP_CNT];
+#endif
+
 #ifdef CONFIG_PREEMPT_NOTIFIERS
 	/* List of struct preempt_notifier: */
 	struct hlist_head		preempt_notifiers;
@@ -851,6 +904,10 @@ struct task_struct {
 #ifndef CONFIG_SLOB
 	unsigned			memcg_kmem_skip_account:1;
 #endif
+#endif
+#ifdef CONFIG_LRU_GEN
+	/* whether the LRU algorithm may apply to this access */
+	unsigned			in_lru_fault:1;
 #endif
 #ifdef CONFIG_COMPAT_BRK
 	unsigned			brk_randomized:1;
