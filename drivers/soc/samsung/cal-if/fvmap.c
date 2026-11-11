@@ -5,12 +5,18 @@
 #include <linux/debugfs.h>
 #include <linux/uaccess.h>
 #include <linux/kobject.h>
+#include <linux/workqueue.h>
+#include <linux/thermal.h>
+#include <linux/kernel_stat.h>
+#include <linux/math64.h>
+#include <linux/power_supply.h>
 #include <soc/samsung/cal-if.h>
 
 #include "fvmap.h"
 #include "cmucal.h"
 #include "vclk.h"
 #include "ra.h"
+#include "exynos9820-oc.h"
 
 #define FVMAP_SIZE		(SZ_8K)
 #define STEP_UV			(6250)
@@ -19,8 +25,9 @@ void __iomem *fvmap_base;
 void __iomem *sram_fvmap_base;
 
 static int init_margin_table[MAX_MARGIN_ID];
-static int volt_offset_percent = 0;
 static int percent_margin_table[MAX_MARGIN_ID];
+
+static int volt_offset_percent;
 
 static int __init get_mif_volt(char *str)
 {
@@ -389,6 +396,212 @@ static const struct attribute_group percent_margin_group = {
 	.attrs = percent_margin_attrs,
 };
 
+static void exynos9820_uv_set(int margin_id, int percent)
+{
+	int id;
+
+	if (margin_id < 0 || margin_id >= MAX_MARGIN_ID)
+		return;
+	if (percent_margin_table[margin_id] == percent)
+		return;
+	id = get_vclk_id_from_margin_id(margin_id);
+	if (id < 0)
+		return;
+	percent_margin_table[margin_id] = percent;
+	cal_dfs_set_volt_margin(id | ACPM_VCLK_TYPE, percent);
+}
+
+static unsigned int margin_of_cal(unsigned int cal_id)
+{
+	struct vclk *vclk = cmucal_get_node(cal_id);
+
+	return vclk ? vclk->margin_id : MAX_MARGIN_ID;
+}
+
+void exynos9820_uv_prepare_cpu(unsigned int cal_id, unsigned int old_khz,
+		unsigned int new_khz)
+{
+	unsigned int margin_id = margin_of_cal(cal_id);
+	int old_percent, new_percent;
+
+	if (!exynos9820_cpu_margin_for_freq(margin_id, old_khz, &old_percent))
+		return;
+	if (!exynos9820_cpu_margin_for_freq(margin_id, new_khz, &new_percent))
+		return;
+	if (new_percent > old_percent)
+		exynos9820_uv_set(margin_id, new_percent);
+}
+
+void exynos9820_uv_finish_cpu(unsigned int cal_id, unsigned int khz)
+{
+	unsigned int margin_id = margin_of_cal(cal_id);
+	int percent;
+
+	if (exynos9820_cpu_margin_for_freq(margin_id, khz, &percent))
+		exynos9820_uv_set(margin_id, percent);
+}
+
+void exynos9820_uv_prepare_gpu(unsigned int old_khz, unsigned int new_khz)
+{
+	int old_percent, new_percent;
+
+	if (!exynos9820_gpu_margin_for_freq(old_khz, &old_percent))
+		return;
+	if (!exynos9820_gpu_margin_for_freq(new_khz, &new_percent))
+		return;
+	if (new_percent > old_percent)
+		exynos9820_uv_set(MARGIN_G3D, new_percent);
+}
+
+void exynos9820_uv_finish_gpu(unsigned int khz)
+{
+	int percent;
+
+	if (exynos9820_gpu_margin_for_freq(khz, &percent))
+		exynos9820_uv_set(MARGIN_G3D, percent);
+}
+
+/* Same percent on little, mid, big and G3D. -3 only while busy and cool:
+ * load >= 65 (held down to 35), the hottest of BIG, MID and G3D below 65C,
+ * and the power_supply battery below 37C. Otherwise 0.
+ * A missing sensor forces 0. Load is the /proc/stat busy percent.
+ */
+static int smart_uv;
+static bool smart_uv_sensors_warned;
+static bool smart_uv_boost;
+static bool smart_uv_have_load;
+static u64 smart_uv_total_prev;
+static u64 smart_uv_idle_prev;
+static struct delayed_work smart_uv_work;
+
+static int smart_uv_zone_mc(const char *name, int *temp)
+{
+	struct thermal_zone_device *tz;
+
+	tz = thermal_zone_get_zone_by_name(name);
+	if (IS_ERR(tz))
+		return -ENODEV;
+	return thermal_zone_get_temp(tz, temp);
+}
+
+static int smart_uv_load_percent(void)
+{
+	u64 user = 0, nice = 0, system = 0, idle = 0, iowait = 0;
+	u64 irq = 0, softirq = 0, steal = 0, total, idle_all, delta, idle_delta;
+	int cpu, load;
+	struct kernel_cpustat *kcs;
+
+	for_each_possible_cpu(cpu) {
+		kcs = &kcpustat_cpu(cpu);
+		user += kcs->cpustat[CPUTIME_USER];
+		nice += kcs->cpustat[CPUTIME_NICE];
+		system += kcs->cpustat[CPUTIME_SYSTEM];
+		idle += kcs->cpustat[CPUTIME_IDLE];
+		iowait += kcs->cpustat[CPUTIME_IOWAIT];
+		irq += kcs->cpustat[CPUTIME_IRQ];
+		softirq += kcs->cpustat[CPUTIME_SOFTIRQ];
+		steal += kcs->cpustat[CPUTIME_STEAL];
+	}
+	total = user + nice + system + idle + iowait + irq + softirq + steal;
+	idle_all = idle + iowait;
+	if (!smart_uv_have_load || total <= smart_uv_total_prev) {
+		smart_uv_total_prev = total;
+		smart_uv_idle_prev = idle_all;
+		smart_uv_have_load = true;
+		return 0;
+	}
+	delta = total - smart_uv_total_prev;
+	idle_delta = idle_all > smart_uv_idle_prev ? idle_all - smart_uv_idle_prev : delta;
+	if (idle_delta > delta)
+		idle_delta = delta;
+	smart_uv_total_prev = total;
+	smart_uv_idle_prev = idle_all;
+	load = div64_u64((delta - idle_delta) * 100, delta);
+	return load > 100 ? 100 : load;
+}
+
+static int smart_uv_hottest(int *temp)
+{
+	static const char * const names[] = { "BIG", "MID", "G3D" };
+	int i, cur, hottest = 0;
+
+	for (i = 0; i < 3; i++) {
+		if (smart_uv_zone_mc(names[i], &cur))
+			return -ENODEV;
+		if (!i || cur > hottest)
+			hottest = cur;
+	}
+	*temp = hottest;
+	return 0;
+}
+
+/* power_supply temperature is in tenths of a degree. */
+static int smart_uv_battery(int *temp_mc, int *capacity, bool *charging)
+{
+	struct power_supply *psy;
+	union power_supply_propval val;
+
+	*capacity = 100;
+	*charging = false;
+	psy = power_supply_get_by_name("battery");
+	if (!psy)
+		return -ENODEV;
+	if (power_supply_get_property(psy, POWER_SUPPLY_PROP_TEMP, &val)) {
+		power_supply_put(psy);
+		return -EIO;
+	}
+	*temp_mc = val.intval * 100;
+	if (!power_supply_get_property(psy, POWER_SUPPLY_PROP_CAPACITY, &val))
+		*capacity = val.intval;
+	if (!power_supply_get_property(psy, POWER_SUPPLY_PROP_STATUS, &val))
+		*charging = val.intval == POWER_SUPPLY_STATUS_CHARGING;
+	power_supply_put(psy);
+	return 0;
+}
+
+static void smart_uv_apply(int percent)
+{
+	exynos9820_uv_set(MARGIN_LIT, percent);
+	exynos9820_uv_set(MARGIN_MID, percent);
+	exynos9820_uv_set(MARGIN_BIG, percent);
+	exynos9820_uv_set(MARGIN_G3D, percent);
+}
+
+static void smart_uv_fn(struct work_struct *work)
+{
+	int hot = 0, bat = 0, load, capacity, ceiling, next;
+	bool charging, cool, hold, boost;
+
+	(void)work;
+	load = smart_uv_load_percent();
+	if (smart_uv_hottest(&hot) || smart_uv_battery(&bat, &capacity, &charging)) {
+		next = 0;
+		smart_uv_boost = false;
+		if (!smart_uv_sensors_warned) {
+			pr_info("smart-uv: thermal or battery unreadable, margin 0\n");
+			smart_uv_sensors_warned = true;
+		}
+	} else {
+		ceiling = charging ? 37000 : 39000;
+		cool = hot < 70000 && bat < ceiling;
+		hold = smart_uv_boost && hot < 72000 && bat < ceiling + 1000 &&
+			load >= 35;
+		boost = (cool && load >= 65) || hold;
+		if (capacity <= 15 && !charging)
+			boost = false;
+		smart_uv_boost = boost;
+		next = (boost && hot < 65000 && bat < 37000) ? -3 : 0;
+	}
+
+	if (next != smart_uv) {
+		smart_uv = next;
+		smart_uv_apply(next);
+		pr_info("smart-uv: %d%% load=%d hot=%d bat=%d\n",
+			next, load, hot, bat);
+	}
+	schedule_delayed_work(&smart_uv_work, 5 * HZ);
+}
+
 static void fvmap_copy_from_sram(void __iomem *map_base, void __iomem *sram_base)
 {
 	volatile struct fvmap_header *fvmap_header, *header;
@@ -441,6 +654,10 @@ static void fvmap_copy_from_sram(void __iomem *map_base, void __iomem *sram_base
 		check_percent_margin(old, fvmap_header[i].num_of_lv);
 
 		margin = init_margin_table[vclk->margin_id];
+		if (margin && vclk->margin_id == MARGIN_BIG && exynos9820_oc_defer_big())
+			margin = 0;
+		if (margin && vclk->margin_id == MARGIN_G3D && exynos9820_oc_defer_g3d())
+			margin = 0;
 		if (margin)
 			cal_dfs_set_volt_margin(i | ACPM_VCLK_TYPE, margin);
 
@@ -507,6 +724,24 @@ int fvmap_init(void __iomem *sram_base)
 	sram_fvmap_base = sram_base;
 	pr_info("%s:fvmap initialize %p\n", __func__, sram_base);
 	fvmap_copy_from_sram(map_base, sram_base);
+	exynos9820_oc_init(map_base, sram_base);
+	if (exynos9820_oc_defer_big() &&
+	    (!exynos9820_oc_big_enabled() || exynos9820_oc_big_keep_uv())) {
+		int id = get_vclk_id_from_margin_id(MARGIN_BIG);
+
+		if (id >= 0 && init_margin_table[MARGIN_BIG])
+			cal_dfs_set_volt_margin(id | ACPM_VCLK_TYPE,
+						init_margin_table[MARGIN_BIG]);
+	} else if (exynos9820_oc_big_enabled()) {
+		percent_margin_table[MARGIN_BIG] = 0;
+	}
+	if (exynos9820_oc_defer_g3d() && init_margin_table[MARGIN_G3D]) {
+		int id = get_vclk_id_from_margin_id(MARGIN_G3D);
+
+		if (id >= 0)
+			cal_dfs_set_volt_margin(id | ACPM_VCLK_TYPE,
+						init_margin_table[MARGIN_G3D]);
+	}
 
 	/* percent margin for each doamin at runtime */
 	kobj = kobject_create_and_add("percent_margin", power_kobj);
@@ -515,6 +750,9 @@ int fvmap_init(void __iomem *sram_base)
 
 	if (sysfs_create_group(kobj, &percent_margin_group))
 		pr_err("Fail to create percent_margin group\n");
+
+	INIT_DELAYED_WORK(&smart_uv_work, smart_uv_fn);
+	schedule_delayed_work(&smart_uv_work, 10 * HZ);
 
 	return 0;
 }

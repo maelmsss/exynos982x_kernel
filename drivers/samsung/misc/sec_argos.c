@@ -373,6 +373,7 @@ int argos_irq_affinity_apply(int dev_num, bool enable)
 
 		result = irq_set_affinity(this->irq, mask);
 
+
 		pr_info("%s: irq%d affinity %s to cpu_mask:0x%X\n",
 			__func__, this->irq, (enable ? "enable" : "disable"),
 			(int)*mask->bits);

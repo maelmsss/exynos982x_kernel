@@ -5,6 +5,9 @@
  * Copyright (c) 2012 Samsung Electronics Co., Ltd.
  *             http://www.samsung.com/
  */
+#include <linux/sched/task.h>
+#include <linux/spinlock.h>
+
 #define GC_THREAD_MIN_WB_PAGES		1	/*
 						 * a threshold to determine
 						 * whether IO subsystem is idle
@@ -14,6 +17,14 @@
 #define DEF_GC_THREAD_MIN_SLEEP_TIME	30000	/* milliseconds */
 #define DEF_GC_THREAD_MAX_SLEEP_TIME	60000
 #define DEF_GC_THREAD_NOGC_SLEEP_TIME	300000	/* wait 5 min */
+
+/* choose candidates from sections which has age of more than 7 days */
+#define DEF_GC_THREAD_AGE_THRESHOLD		(60 * 60 * 24 * 7)
+#define DEF_GC_THREAD_CANDIDATE_RATIO		20	/* select 20% oldest sections as candidates */
+#define DEF_GC_THREAD_MAX_CANDIDATE_COUNT	10	/* select at most 10 sections as candidates */
+#define DEF_GC_THREAD_AGE_WEIGHT		60	/* age weight */
+#define DEFAULT_ACCURACY_CLASS			10000	/* accuracy class */
+
 #define LIMIT_INVALID_BLOCK	40 /* percentage over total user space */
 #define LIMIT_FREE_BLOCK	40 /* percentage over invalid + free space */
 
@@ -24,6 +35,7 @@
 
 struct f2fs_gc_kthread {
 	struct task_struct *f2fs_gc_task;
+	spinlock_t gc_task_lock;		/* protects f2fs_gc_task */
 	wait_queue_head_t gc_wait_queue_head;
 
 	/* for gc sleep time */
@@ -34,11 +46,45 @@ struct f2fs_gc_kthread {
 
 	/* for changing gc mode */
 	unsigned int gc_wake;
+
+	/* for GC_MERGE mount option */
+	wait_queue_head_t fggc_wq;		/*
+						 * caller of f2fs_balance_fs()
+						 * will wait on this wait queue.
+						 */
 };
+
+static inline void f2fs_set_gc_task(struct f2fs_gc_kthread *gc_th,
+				    struct task_struct *task)
+{
+	spin_lock(&gc_th->gc_task_lock);
+	WRITE_ONCE(gc_th->f2fs_gc_task, task);
+	spin_unlock(&gc_th->gc_task_lock);
+}
+
+static inline struct task_struct *
+f2fs_detach_gc_task(struct f2fs_gc_kthread *gc_th)
+{
+	struct task_struct *task;
+
+	spin_lock(&gc_th->gc_task_lock);
+	task = READ_ONCE(gc_th->f2fs_gc_task);
+	WRITE_ONCE(gc_th->f2fs_gc_task, NULL);
+	spin_unlock(&gc_th->gc_task_lock);
+
+	return task;
+}
 
 struct gc_inode_list {
 	struct list_head ilist;
 	struct radix_tree_root iroot;
+};
+
+struct victim_entry {
+	struct rb_node rb_node;		/* rb node located in rb-tree */
+	unsigned long long mtime;	/* mtime of section */
+	unsigned int segno;		/* segment No. */
+	struct list_head list;
 };
 
 /*

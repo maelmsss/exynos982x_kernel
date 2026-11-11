@@ -437,21 +437,10 @@ static void input_handle_event(struct input_dev *dev,
  * axis, etc.
  */
 
-#ifdef CONFIG_KSU
-extern bool ksu_input_hook __read_mostly;
-extern __attribute__((cold)) int ksu_handle_input_handle_event(
-			unsigned int *type, unsigned int *code, int *value);
-#endif
-
 void input_event(struct input_dev *dev,
 		 unsigned int type, unsigned int code, int value)
 {
 	unsigned long flags;
-
-#ifdef CONFIG_KSU
-	if (unlikely(ksu_input_hook))
-		ksu_handle_input_handle_event(&type, &code, &value);
-#endif
 
 	if (is_event_supported(type, dev->evbit, EV_MAX)) {
 
@@ -745,6 +734,19 @@ static int input_disable_device(struct input_dev *dev)
 	mutex_unlock(&dev->mutex);
 	return 0;
 }
+
+/**
+ * input_set_device_enabled - change the gate without dropping handler references
+ * @dev: input device whose existing open/close callbacks manage power
+ * @enabled: whether existing handlers should receive events
+ *
+ * Serialises with the legacy enabled sysfs attribute through dev->mutex.
+ */
+int input_set_device_enabled(struct input_dev *dev, bool enabled)
+{
+	return enabled ? input_enable_device(dev) : input_disable_device(dev);
+}
+EXPORT_SYMBOL_GPL(input_set_device_enabled);
 
 /*
  * Simulate keyup events for all keys that are marked as pressed.

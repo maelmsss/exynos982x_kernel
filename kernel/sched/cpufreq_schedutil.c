@@ -32,6 +32,8 @@ struct sugov_tunables {
 	struct gov_attr_set attr_set;
 	unsigned int up_rate_limit_us;
 	unsigned int down_rate_limit_us;
+	bool up_rate_limit_user_set;
+	bool down_rate_limit_user_set;
 };
 
 struct sugov_policy {
@@ -361,6 +363,14 @@ static void sugov_get_util(unsigned long *util, unsigned long *max, int cpu)
 	part_cpu_active_ratio(util, max, cpu);
 #endif
 
+#ifdef CONFIG_UCLAMP_TASK
+	/*
+	 * Apply the utilization clamps last: a task's min clamp raises the
+	 * requested frequency even after the active-ratio scaling, which is
+	 * what Android's ADPF hints expect.
+	 */
+	*util = uclamp_util_with(cpu_rq(cpu), *util, NULL);
+#endif
 }
 
 static void sugov_set_iowait_boost(struct sugov_cpu *sg_cpu, u64 time,
@@ -541,11 +551,18 @@ void sugov_update_rate_limit_us(struct cpufreq_policy *policy,
 	if (!tunables)
 		return;
 
-	tunables->up_rate_limit_us = (unsigned int)(up_rate_limit_ms * USEC_PER_MSEC);
-	tunables->down_rate_limit_us = (unsigned int)(down_rate_limit_ms * USEC_PER_MSEC);
+	/* Frequency-variant defaults must not erase explicit sysfs tuning. */
+	if (!READ_ONCE(tunables->up_rate_limit_user_set))
+		WRITE_ONCE(tunables->up_rate_limit_us,
+			(unsigned int)(up_rate_limit_ms * USEC_PER_MSEC));
+	if (!READ_ONCE(tunables->down_rate_limit_user_set))
+		WRITE_ONCE(tunables->down_rate_limit_us,
+			(unsigned int)(down_rate_limit_ms * USEC_PER_MSEC));
 
-	sg_policy->up_rate_delay_ns = up_rate_limit_ms * NSEC_PER_MSEC;
-	sg_policy->down_rate_delay_ns = down_rate_limit_ms * NSEC_PER_MSEC;
+	sg_policy->up_rate_delay_ns =
+		READ_ONCE(tunables->up_rate_limit_us) * NSEC_PER_USEC;
+	sg_policy->down_rate_delay_ns =
+		READ_ONCE(tunables->down_rate_limit_us) * NSEC_PER_USEC;
 
 	update_min_rate_limit_ns(sg_policy);
 }
@@ -618,6 +635,7 @@ static ssize_t up_rate_limit_us_store(struct gov_attr_set *attr_set,
 		return -EINVAL;
 
 	tunables->up_rate_limit_us = rate_limit_us;
+	WRITE_ONCE(tunables->up_rate_limit_user_set, true);
 
 	list_for_each_entry(sg_policy, &attr_set->policy_list, tunables_hook) {
 		sg_policy->up_rate_delay_ns = rate_limit_us * NSEC_PER_USEC;
@@ -638,6 +656,7 @@ static ssize_t down_rate_limit_us_store(struct gov_attr_set *attr_set,
 		return -EINVAL;
 
 	tunables->down_rate_limit_us = rate_limit_us;
+	WRITE_ONCE(tunables->down_rate_limit_user_set, true);
 
 	list_for_each_entry(sg_policy, &attr_set->policy_list, tunables_hook) {
 		sg_policy->down_rate_delay_ns = rate_limit_us * NSEC_PER_USEC;
